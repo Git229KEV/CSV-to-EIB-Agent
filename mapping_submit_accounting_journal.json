@@ -1,0 +1,66 @@
+{
+  "_comment": "CSV -> Workday 'Submit Accounting Journal v48.0' EIB. Column letters/labels refer to Submit_Accounting_Journal_v48.0.xlsx. Labels are verified against row 5 before writing.",
+  "version": "v48.0",
+  "eib_sheet": "Submit Accounting Journal",
+  "label_row": 5,
+  "type_row": 4,
+  "first_data_row": 6,
+
+  "fields": [
+    {"csv": "JournalKey",                     "eib": "B",  "label": "Spreadsheet Key*"},
+    {"csv": "AddOnlyJournal",                 "eib": "C",  "label": "Add Only",          "transform": "yn"},
+    {"csv": "AccountingJournalReferenceID",   "eib": "D",  "label": "Accounting Journal"},
+    {"csv": "-- (Static Value)",             "eib": "E",  "label": "Auto Complete",     "static_value": "Y"},
+    {"csv": "AccountingJournalID",            "eib": "H",  "label": "Accounting Journal ID"},
+    {"csv": "Submit",                         "eib": "I",  "label": "Submit",            "transform": "yn"},
+    {"csv": "JournalNumber",                  "eib": "M",  "label": "Journal Number"},
+    {"csv": "CompanyReferenceID",             "eib": "O",  "label": "Company*"},
+    {"csv": "Currency",                       "eib": "P",  "label": "Currency*"},
+    {"csv": "LedgerType",                     "eib": "Q",  "label": "Ledger Type*"},
+    {"csv": "BookCode",                       "eib": "R",  "label": "Book Code"},
+    {"csv": "AccountingDate",                 "eib": "S",  "label": "Accounting Date*"},
+    {"csv": "JournalSource",                  "eib": "T",  "label": "Journal Source*"},
+    {"csv": "Record_Quantity",                "eib": "X",  "label": "Record Quantity"},
+    {"csv": "JournalEntryMemo",               "eib": "Y",  "label": "Journal Entry Memo"},
+    {"csv": "JournalExternalReferenceID",     "eib": "Z",  "label": "External Reference ID"},
+
+    {"csv": "LineOrder",                      "eib": "AJ", "label": "Line Order"},
+    {"csv": "LineCompanyReferenceID",         "eib": "AK", "label": "Line Company"},
+    {"csv": "LedgerAccountReferenceID",       "eib": "AL", "label": "Ledger Account*"},
+    {"csv": "LedgerAccountReferenceID_ParentID", "eib": "AM", "label": "Account Set"},
+    {"csv": "DebitAmount",                    "eib": "AP", "label": "Debit Amount",      "transform": "number"},
+    {"csv": "CreditAmount",                   "eib": "AQ", "label": "Credit Amount",     "transform": "number"},
+    {"csv": "LineCurrency",                   "eib": "AR", "label": "Currency"},
+    {"csv": "LineMemo",                       "eib": "AZ", "label": "Memo",              "transform": "trim"},
+    {"csv": "JournalLineExternalReferenceID", "eib": "BA", "label": "External Reference ID"},
+    {"csv": "BudgetDate",                     "eib": "BB", "label": "Budget Date"}
+  ],
+
+  "_row_id_comment": "Row ID* is required by the Workday EIB (Column AI / Col 35). Set to 1 for all rows.",
+  "row_id": {"enabled": true, "eib": "AI", "label": "Row ID*", "value": 1},
+
+  "_dedicated_worktags_v48_comment": "Workday v48.0 defines dedicated columns for each worktag dimension, enabling 1:1 row placement.",
+  "dedicated_worktags": [
+    {"csv": "Worktag_Cost_Center_Reference_ID",         "eib": "BC", "col": 55, "label": "Worktag_Cost_Center_Reference_ID", "transform": "int"},
+    {"csv": "Worktag_Spend_Category_ID",                "eib": "BE", "col": 57, "label": "Worktag_Spend_Category_ID"},
+    {"csv": "Worktag_Business_Unit_ID",                 "eib": "BG", "col": 59, "label": "Worktag_Business_Unit_ID"},
+    {"csv": "Worktag_Custom_Organization_Reference_ID", "eib": "BI", "col": 61, "label": "Worktag_Custom_Organization_Reference_ID"},
+    {"csv": "Worktag_Custom_Worktag_1_ID",              "eib": "BK", "col": 63, "label": "Worktag_Custom_Worktag_1_ID"},
+    {"csv": "Worktag_Revenue_Category_ID",             "eib": "BM", "col": 65, "label": "Worktag_Revenue_Category_ID"}
+  ],
+
+  "_type_checks_comment": "CSV 'type' columns are verified against the schema printed in row 4 of the EIB.",
+  "type_checks": [
+    {"csv": "CompanyReferenceIDType",                "eib": "O"},
+    {"csv": "LineCompanyReferenceIDType",            "eib": "AK"},
+    {"csv": "LedgerAccountReferenceIDType",          "eib": "AL"},
+    {"csv": "LedgerAccountReferenceID_ParentIDType", "eib": "AM"}
+  ],
+
+  "ignored_csv": [
+    "CompanyReferenceIDType",
+    "LineCompanyReferenceIDType",
+    "LedgerAccountReferenceIDType",
+    "LedgerAccountReferenceID_ParentIDType"
+  ]
+}

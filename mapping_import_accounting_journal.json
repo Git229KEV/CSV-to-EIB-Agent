@@ -1,0 +1,57 @@
+{
+  "_comment": "Workday 'Import Accounting Journal v45.1' Two-Sheet Individual File Ingestion Mapping Specification.",
+  "version": "v45.1",
+  "target_template": "Import_Accounting_Journal_v45.1.xlsx",
+  "available_sources": [
+    "Accounting_Journal_Raw_LE01_202601.xlsx",
+    "Accounting_Journal_Raw_LE01_202501.xlsx",
+    "Accounting_Journal_Raw_02_202601.xlsx",
+    "Accounting_Journal_RawAgg_01_202501.xlsx",
+    "FPEAST_HSTBAL_155_2023P05_20230711071408.csv"
+  ],
+  "sheet_header": {
+    "sheet_name": "Import Accounting Journal",
+    "label_row": 5,
+    "type_row": 4,
+    "first_data_row": 6,
+    "fields": [
+      {"source": "HeaderKey", "eib": "B", "col": 2, "label": "Header Key*", "rule": "Sequential integer (1..N) uniquely identifying each journal header"},
+      {"source": "AddOnlyJournal", "eib": "C", "col": 3, "label": "Add Only", "transform": "yn", "default": "Y"},
+      {"source": null, "eib": "E", "col": 5, "label": "Accounting Journal", "rule": "Left blank (None)"},
+      {"source": "AccountingJournalID", "eib": "F", "col": 6, "label": "Accounting Journal ID", "rule": "Direct mapping of AccountingJournalID / JournalKey"},
+      {"source": "CompanyReferenceID", "eib": "L", "col": 12, "label": "Company*", "default": "LE01"},
+      {"source": "Currency", "eib": "M", "col": 13, "label": "Currency*", "default": "USD"},
+      {"source": "LedgerType", "eib": "N", "col": 14, "label": "Ledger Type*", "transform": "titlecase", "default": "Actuals"},
+      {"source": "AccountingDate", "eib": "P", "col": 16, "label": "Accounting Date*", "transform": "date"},
+      {"source": "JournalSource", "eib": "Q", "col": 17, "label": "Journal Source*", "default": "Manual_Journal"},
+      {"source": null, "eib": "U", "col": 21, "label": "Record Quantity", "rule": "Left blank (None)"},
+      {"source": "JournalEntryMemo", "eib": "V", "col": 22, "label": "Journal Entry Memo"},
+      {"source": "JournalExternalReferenceID", "eib": "W", "col": 23, "label": "External Reference ID"},
+      {"source": "-- (Static Value)", "eib": "AG", "col": 33, "label": "Auto Complete", "static_value": "Y"}
+    ]
+  },
+  "sheet_lines": {
+    "sheet_name": "Journal Entry Line Replacement",
+    "label_row": 5,
+    "type_row": 4,
+    "first_data_row": 6,
+    "fields": [
+      {"source": "HeaderKey", "eib": "B", "col": 2, "label": "Header Key", "rule": "Count strictly matches source file occurrences"},
+      {"source": "ROW_ID", "eib": "C", "col": 3, "label": "Line Key", "rule": "Mapped directly from ROW_ID column in source file"},
+      {"source": "LineOrder", "eib": "D", "col": 4, "label": "Line Order", "rule": "Mapped directly from LineOrder column in source file"},
+      {"source": "LineCompanyReferenceID", "eib": "E", "col": 5, "label": "Line Company", "default": "LE01"},
+      {"source": "LedgerAccountReferenceID", "eib": "F", "col": 6, "label": "Ledger Account", "transform": "int_or_str", "rule": "Col 6: Ledger Account integer or alphanumeric code"},
+      {"source": "LedgerAccountReferenceID_ParentID", "eib": "G", "col": 7, "label": "Account Set", "default": "ACCOUNT_SET", "rule": "Col 7: Account Set reference"},
+      {"source": "DebitAmount", "eib": "J", "col": 10, "label": "Debit Amount", "transform": "float", "rule": "Populates amount, including 0.0 if zero in source"},
+      {"source": "CreditAmount", "eib": "K", "col": 11, "label": "Credit Amount", "transform": "float", "rule": "Populates amount, including 0.0 if zero in source"},
+      {"source": "LineCurrency", "eib": "L", "col": 12, "label": "Currency", "default": "USD"},
+      {"source": "LineMemo", "eib": "T", "col": 20, "label": "Memo", "rule": "Direct mapping of LineMemo. If empty or 'NULL', mapped as blank with no fallback to header memo"},
+      {"source": "JournalLineExternalReferenceID", "eib": "U", "col": 21, "label": "External Reference ID"},
+      {"source": "BudgetDate", "eib": "V", "col": 22, "label": "Budget Date", "transform": "date"},
+      {"source": "Worktag_Revenue_Category_ID", "eib": "W", "col": 23, "label": "Revenue Category"},
+      {"source": "Worktag_Spend_Category_ID / Spend Category Mapped Ledger Account.xlsx", "eib": "Y", "col": 25, "label": "Spend Category", "rule": "Mapped from Ledger Account via 'Spend Category Mapped Ledger Account.xlsx'"},
+      {"source": "Worktag_Cost_Center_Reference_ID", "eib": "AA", "col": 27, "label": "Cost Center", "transform": "3_digit_str", "rule": "Formatted as 3-digit number (e.g. '000', '090', '070', '200')"},
+      {"source": "Worktag_Business_Unit_ID", "eib": "AC", "col": 29, "label": "Balancing Worktag Affiliate"}
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+# Executables (published separately via GitHub Releases)
+*.exe
+
+# PyInstaller build artifacts
+build/
+dist/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class

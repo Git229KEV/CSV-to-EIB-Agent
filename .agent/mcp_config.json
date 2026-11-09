@@ -1,0 +1,24 @@
+{
+    "mcpServers": {
+        "shadcn": {
+            "command": "cmd.exe",
+            "args": [
+                "/c",
+                "npx",
+                "-y",
+                "shadcn@latest",
+                "mcp"
+            ]
+        },
+        "playwright": {
+            "command": "cmd.exe",
+            "args": [
+                "/c",
+                "npx",
+                "-y",
+                "@playwright/mcp@latest"
+            ]
+        }
+    }
+}
+
