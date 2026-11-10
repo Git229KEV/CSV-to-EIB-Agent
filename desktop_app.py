@@ -23,6 +23,8 @@ from run_agent import (
     find_target_file,
     resolve_target_file,
     get_output_filename,
+    load_source_dataframe,
+    pd,
     TARGET_TEMPLATES
 )
 
@@ -37,8 +39,35 @@ class DesktopApi:
     def is_desktop(self):
         return True
 
+    def inspect_source_file(self, filepath):
+        """Automatically inspects an uploaded/selected source file and detects record & journal counts."""
+        try:
+            resolved = find_source_file(filepath)
+            if not resolved or not os.path.exists(resolved):
+                if os.path.exists(str(filepath)):
+                    resolved = str(filepath)
+                else:
+                    return {"success": False, "error": f"File not found: {filepath}"}
+            df = load_source_dataframe(resolved)
+            seen_keys = []
+            for _, row in df.iterrows():
+                key = row.get("HeaderKey") if "HeaderKey" in row and pd.notna(row.get("HeaderKey")) else (row.get("JournalKey") or row.get("AccountingJournalID"))
+                if key not in seen_keys:
+                    seen_keys.append(key)
+            ext = os.path.splitext(resolved)[1].upper().lstrip(".") or "XLSX"
+            return {
+                "success": True,
+                "filepath": resolved,
+                "filename": os.path.basename(resolved),
+                "total_rows": len(df),
+                "total_journals": max(len(seen_keys), 1) if len(df) > 0 else 0,
+                "format": ext
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def get_default_paths(self):
-        """Returns default workspace, source file, and output paths."""
+        """Returns default workspace and output paths without pre-filling source file."""
         default_out = os.path.abspath("output")
         if not os.path.exists(default_out):
             try:
@@ -46,20 +75,13 @@ class DesktopApi:
             except Exception:
                 pass
 
-        src_2026 = find_source_file("Accounting_Journal_Raw_LE01_202601.xlsx") or "Accounting_Journal_Raw_LE01_202601.xlsx"
-        src_2025 = find_source_file("Accounting_Journal_Raw_LE01_202501.xlsx") or "Accounting_Journal_Raw_LE01_202501.xlsx"
-
         return {
             "workspace_dir": os.path.abspath("."),
-            "default_output_dir": default_out,
-            "source_2026": src_2026,
-            "source_2025": src_2025,
-            "output_name_2026": "Import_Accounting_Journal_v45.0_LE01_2026_P2.xlsx",
-            "output_name_2025": "Import_Accounting_Journal_v45.0_LE01_2025_P1.xlsx"
+            "default_output_dir": default_out
         }
 
     def select_file(self):
-        """Opens native OS file chooser dialog and returns selected path."""
+        """Opens native OS file chooser dialog, auto-detects file contents, and returns selected path."""
         if not self._window:
             return {"success": False, "filepath": None}
         try:
@@ -76,13 +98,17 @@ class DesktopApi:
                 )
             if result and len(result) > 0:
                 selected_path = result[0]
+                info = self.inspect_source_file(selected_path)
                 return {
                     "success": True,
                     "filepath": selected_path,
                     "path": selected_path,
                     "filename": os.path.basename(selected_path),
                     "name": os.path.basename(selected_path),
-                    "size": os.path.getsize(selected_path) if os.path.exists(selected_path) else 0
+                    "size": os.path.getsize(selected_path) if os.path.exists(selected_path) else 0,
+                    "total_rows": info.get("total_rows") if info.get("success") else None,
+                    "total_journals": info.get("total_journals") if info.get("success") else None,
+                    "format": info.get("format") if info.get("success") else None
                 }
             return {"success": False, "cancelled": True, "filepath": None}
         except Exception as e:
@@ -90,7 +116,7 @@ class DesktopApi:
         return {"success": False, "filepath": None}
 
     def stage_uploaded_file(self, filename, base64_data):
-        """Stages a file selected via HTML <input type='file'> into a local temp path so run_agent can read it."""
+        """Stages a file selected via HTML <input type='file'> into a local temp path and auto-detects structure."""
         try:
             if "," in base64_data:
                 base64_data = base64_data.split(",", 1)[1]
@@ -101,11 +127,15 @@ class DesktopApi:
             staged_path = os.path.join(stage_dir, safe_name)
             with open(staged_path, "wb") as f:
                 f.write(raw_bytes)
+            info = self.inspect_source_file(staged_path)
             return {
                 "success": True,
                 "filepath": staged_path,
                 "filename": safe_name,
-                "size": len(raw_bytes)
+                "size": len(raw_bytes),
+                "total_rows": info.get("total_rows") if info.get("success") else None,
+                "total_journals": info.get("total_journals") if info.get("success") else None,
+                "format": info.get("format") if info.get("success") else None
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

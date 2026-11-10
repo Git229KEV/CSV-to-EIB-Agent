@@ -143,44 +143,11 @@
           <input type="file" id="fallbackFileInput" class="hidden" accept=".xlsx, .csv" />
         </div>
 
-        <!-- Quick Select Buttons for 2026 & 2025 Source Files -->
-        <div class="flex items-center gap-2 pt-1">
-          <span class="text-[10px] font-mono text-zinc-400 uppercase">Quick Select:</span>
-          
-          <button 
-            type="button"
-            onclick="selectSourceFilePreset('Accounting_Journal_Raw_LE01_202601.xlsx')"
-            id="presetBtn-2026"
-            class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 flex items-center space-x-1.5 transition"
-          >
-            <i data-lucide="file-spreadsheet" class="w-3 h-3 text-emerald-400"></i>
-            <span>2026 Source (222 Lines)</span>
-          </button>
-
-          <button 
-            type="button"
-            onclick="selectSourceFilePreset('Accounting_Journal_Raw_LE01_202501.xlsx')"
-            id="presetBtn-2025"
-            class="px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 flex items-center space-x-1.5 transition"
-          >
-            <i data-lucide="file-spreadsheet" class="w-3 h-3 text-teal-400"></i>
-            <span>2025 Source (8 Lines)</span>
-          </button>
-
-          <button 
-            type="button"
-            onclick="loadSampleCsv()"
-            class="px-2 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:bg-zinc-850"
-          >
-            Load Workspace Sample CSV
-          </button>
-        </div>
-
         <!-- Source details pill -->
         <div id="sourceDetailsCard" class="p-2.5 rounded-lg bg-[#0b0d13] border border-app-border/70 flex items-center justify-between text-[11px] font-mono">
           <div class="flex items-center space-x-2">
             <span class="text-zinc-400">Active Source:</span>
-            <span id="sourceFileNameLabel" class="text-white font-bold">Accounting_Journal_Raw_LE01_202601.xlsx</span>
+            <span id="sourceFileNameLabel" class="text-zinc-400 italic">Auto-detects upon file upload (.xlsx / .csv)</span>
           </div>
           <div class="flex items-center space-x-2">
             <span class="text-emerald-400 font-semibold flex items-center gap-1">
@@ -474,7 +441,7 @@
   <script>
     // Desktop App State
     let currentSourcePath = "";
-    let currentSourceFilename = "Accounting_Journal_Raw_LE01_202601.xlsx";
+    let currentSourceFilename = "";
     let currentSaveLocation = "";
     let selectedTemplateId = "v45";
     let selectedTemplateVersion = "v45.1";
@@ -486,11 +453,6 @@
       'v46': { version: 'v46.0', file: 'Submit_Accounting_Journal_v46.0.xlsx', name: 'Single-Sheet' },
       'v47': { version: 'v47.0', file: 'Submit_Accounting_Journal_v47.0.xlsx', name: 'Single-Sheet Worktags+' },
       'v48': { version: 'v48.0', file: 'Submit_Accounting_Journal_v48.0.xlsx', name: 'Single-Sheet Dedicated Worktags' },
-    };
-
-    let sourcePathMap = {
-      'Accounting_Journal_Raw_LE01_202601.xlsx': '',
-      'Accounting_Journal_Raw_LE01_202501.xlsx': ''
     };
 
     // Native pywebview Bridge Resolver
@@ -520,10 +482,10 @@
     }
 
     document.addEventListener("DOMContentLoaded", async () => {
-      // Initialize default paths via Native IPC
+      // Initialize default paths via Native IPC (keep source input empty so placeholder is visible)
       await loadDefaultPaths();
 
-      // Setup fallback file input (stages actual file bytes to disk via Native IPC)
+      // Setup fallback file input (stages actual file bytes to disk via Native IPC and auto-detects structure)
       const fallbackInput = document.getElementById("fallbackFileInput");
       fallbackInput.addEventListener("change", async (e) => {
         if (e.target.files.length > 0) {
@@ -535,16 +497,16 @@
               if (api && api.stage_uploaded_file) {
                 const staged = await api.stage_uploaded_file(file.name, reader.result);
                 if (staged && staged.success && staged.filepath) {
-                  setSourceFile(staged.filepath, file.name);
-                  logToConsole(`[Source] Loaded local file: ${file.name} (${formatBytes(file.size)})`);
+                  await setSourceFile(staged.filepath, file.name, staged);
+                  logToConsole(`[Source] Uploaded local file: ${file.name} (${formatBytes(file.size)})`);
                   return;
                 }
               }
             } catch (err) {
               console.warn("stage_uploaded_file error:", err);
             }
-            setSourceFile(file.name, file.name);
-            logToConsole(`[Source] Loaded local file: ${file.name} (${formatBytes(file.size)})`);
+            await setSourceFile(file.name, file.name);
+            logToConsole(`[Source] Uploaded local file: ${file.name} (${formatBytes(file.size)})`);
           };
           reader.readAsDataURL(file);
         }
@@ -554,18 +516,16 @@
     });
 
     async function loadDefaultPaths() {
+      // Ensure sourcePathInput remains empty on startup so the placeholder is displayed
+      document.getElementById("sourcePathInput").value = "";
       try {
         const api = await getApi();
         if (api && api.get_default_paths) {
           const data = await api.get_default_paths();
           currentSaveLocation = data.default_output_dir || "output";
           document.getElementById("saveLocationInput").value = currentSaveLocation;
-
-          sourcePathMap['Accounting_Journal_Raw_LE01_202601.xlsx'] = data.source_2026 || "Accounting_Journal_Raw_LE01_202601.xlsx";
-          sourcePathMap['Accounting_Journal_Raw_LE01_202501.xlsx'] = data.source_2025 || "Accounting_Journal_Raw_LE01_202501.xlsx";
-
-          setSourceFile(data.source_2026 || "Accounting_Journal_Raw_LE01_202601.xlsx", "Accounting_Journal_Raw_LE01_202601.xlsx");
           logToConsole(`[Init] Default save location set: ${currentSaveLocation}`);
+          logToConsole(`[Ready] Browse and upload a source accounting file (.xlsx or .csv) to auto-detect schema & records.`);
           return;
         }
       } catch (err) {
@@ -573,30 +533,38 @@
       }
       currentSaveLocation = "output";
       document.getElementById("saveLocationInput").value = "output";
-      setSourceFile("Accounting_Journal_Raw_LE01_202601.xlsx", "Accounting_Journal_Raw_LE01_202601.xlsx");
     }
 
-    function setSourceFile(fullPath, filename) {
+    async function setSourceFile(fullPath, filename, meta = null) {
       currentSourcePath = fullPath;
       currentSourceFilename = filename || fullPath.split('\\').pop().split('/').pop();
 
       document.getElementById("sourcePathInput").value = currentSourcePath;
-      document.getElementById("sourceFileNameLabel").innerText = currentSourceFilename;
+      const labelEl = document.getElementById("sourceFileNameLabel");
+      labelEl.className = "text-white font-bold";
 
-      if (currentSourceFilename.includes("2025")) {
-        document.getElementById("presetBtn-2025").className = "px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30";
-        document.getElementById("presetBtn-2026").className = "px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700";
-      } else {
-        document.getElementById("presetBtn-2026").className = "px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30";
-        document.getElementById("presetBtn-2025").className = "px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700";
+      let detected = meta;
+      if (!detected || detected.total_rows === undefined || detected.total_rows === null) {
+        try {
+          const api = await getApi();
+          if (api && api.inspect_source_file) {
+            const info = await api.inspect_source_file(currentSourcePath);
+            if (info && info.success) {
+              detected = info;
+            }
+          }
+        } catch (e) {
+          console.warn("inspect_source_file error:", e);
+        }
       }
 
-      logToConsole(`[Source] Active source selected: ${currentSourceFilename}`);
-    }
-
-    function selectSourceFilePreset(presetFilename) {
-      const fullPath = sourcePathMap[presetFilename] || presetFilename;
-      setSourceFile(fullPath, presetFilename);
+      if (detected && detected.total_rows !== undefined && detected.total_rows !== null) {
+        labelEl.innerText = `${currentSourceFilename} — Auto-Detected (${detected.total_rows} lines, ${detected.total_journals || 1} journals)`;
+        logToConsole(`[Engine] Auto-detected file structure: ${currentSourceFilename} (${detected.total_rows} line records, ${detected.total_journals || 1} unique journal headers)`);
+      } else {
+        labelEl.innerText = currentSourceFilename;
+        logToConsole(`[Source] Active source selected: ${currentSourceFilename}`);
+      }
     }
 
     async function browseSourceFile() {
@@ -605,7 +573,7 @@
         try {
           const res = await api.select_file();
           if (res && res.filepath) {
-            setSourceFile(res.filepath, res.filename || res.name);
+            await setSourceFile(res.filepath, res.filename || res.name, res);
             if (res.size) {
               logToConsole(`[Source] Loaded local file: ${res.filename || res.name} (${formatBytes(res.size)})`);
             }
@@ -663,6 +631,14 @@
     }
 
     async function runIngestPipeline() {
+      const srcName = currentSourcePath || currentSourceFilename;
+      if (!srcName) {
+        logToConsole(`[ERROR] Please browse and select a source accounting file (.xlsx or .csv) in Step 1 first.`);
+        document.getElementById("execBadge").innerText = "SOURCE FILE REQUIRED";
+        document.getElementById("execMessage").innerText = "Please click 'Browse File...' in Step 1 to upload your source accounting file.";
+        return;
+      }
+
       const nameInput = document.getElementById("outputFileNameInput");
       let customOutputName = nameInput ? nameInput.value.trim() : "";
       if (!customOutputName) {
@@ -683,7 +659,6 @@
       document.getElementById("statusBarState").innerText = "Processing...";
 
       logToConsole(`\n>>> STARTING WORKDAY EIB INGESTION...`);
-      const srcName = currentSourcePath || currentSourceFilename;
       logToConsole(`[Config] Source: ${srcName}`);
       logToConsole(`[Config] Template: ${selectedTemplateVersion} (${selectedTemplateFilename})`);
       logToConsole(`[Config] Save Directory: ${currentSaveLocation}`);
@@ -701,10 +676,10 @@
         }
 
         const summary = data.summary || {};
-        const lines = summary.total_lines_written || (srcName.includes("2025") ? 8 : 222);
-        const debits = summary.total_debit ? `$${Number(summary.total_debit).toLocaleString('en-US', {minimumFractionDigits: 2})}` : (srcName.includes("2025") ? "$96,086,590.02" : "$9,367,000.88");
-        const credits = summary.total_credit ? `$${Number(summary.total_credit).toLocaleString('en-US', {minimumFractionDigits: 2})}` : debits;
-        const scCount = summary.spend_categories_mapped || (srcName.includes("2025") ? 2 : 56);
+        const lines = summary.total_lines_written ?? 0;
+        const debits = summary.total_debit !== undefined ? `$${Number(summary.total_debit).toLocaleString('en-US', {minimumFractionDigits: 2})}` : "$0.00";
+        const credits = summary.total_credit !== undefined ? `$${Number(summary.total_credit).toLocaleString('en-US', {minimumFractionDigits: 2})}` : debits;
+        const scCount = summary.spend_categories_mapped ?? 0;
         lastGeneratedFile = data.target_path || data.target_file;
 
         logToConsole(`[Ingest] Successfully mapped ${lines} records from source.`);
@@ -787,20 +762,6 @@
       if (api && api.open_in_explorer) {
         api.open_in_explorer(folderToOpen);
       }
-    }
-
-    async function loadSampleCsv() {
-      const api = await getApi();
-      if (api && api.get_sample_csv) {
-        try {
-          const data = await api.get_sample_csv();
-          if (data && data.success && data.filename) {
-            setSourceFile(data.path || data.filename, data.filename);
-            return;
-          }
-        } catch (e) {}
-      }
-      selectSourceFilePreset("Accounting_Journal_Raw_LE01_202601.xlsx");
     }
 
     function logToConsole(msg) {

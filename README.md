@@ -4,8 +4,8 @@
 
 ### Enterprise Desktop Application & Automated Data Transformation Engine (`v45.1` – `v48.0`)
 
-[![Release](https://img.shields.io/badge/Release-v1.0.0-10b981?style=for-the-badge&logo=github)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/tag/v1.0.0)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20Desktop%20(.EXE)-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.0.0/WorkdayEIBStudio.exe)
+[![Release](https://img.shields.io/badge/Release-v1.1.0-10b981?style=for-the-badge&logo=github)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/tag/v1.1.0)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20Desktop%20(.EXE)-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.1.0/WorkdayEIBStudio.exe)
 [![Workday EIB](https://img.shields.io/badge/Workday%20EIB-v45.1%20%7C%20v46.0%20%7C%20v47.0%20%7C%20v48.0-f59e0b?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
 [![Architecture](https://img.shields.io/badge/Engine-Native%20IPC%20%2B%20OpenPyXL-8b5cf6?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
 [![Balance Verification](https://img.shields.io/badge/Debit%2FCredit%20Variance-%240.00%20(100%25%20Balanced)-10b981?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.0.0/WorkdayEIBStudio.exe"><strong>⬇ Download Standalone Windows Executable (WorkdayEIBStudio.exe)</strong></a>
+  <a href="https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.1.0/WorkdayEIBStudio.exe"><strong>⬇ Download Standalone Windows Executable (WorkdayEIBStudio.exe — v1.1.0)</strong></a>
   &nbsp;•&nbsp;
   <a href="#-step-by-step-guide-how-to-upload--process-a-file"><strong>How to Upload & Process</strong></a>
   &nbsp;•&nbsp;
@@ -55,7 +55,7 @@
 ```mermaid
 flowchart TD
     subgraph UI["Enterprise Desktop Studio (frontend/index.html)"]
-        A["Panel 1: Source Selection<br/>Browse File / Quick Presets / Upload Fallback"]
+        A["Panel 1: Source Accounting File<br/>Placeholder + Browse File... + Auto-Detect Schema"]
         B["Panel 2: Save Destination & Naming<br/>Folder Browser + Custom Output Filename (.xlsx)"]
         C["Panel 3: EIB Template Selector<br/>v45.1 (Two-Sheet) | v46.0 | v47.0 | v48.0"]
         D["Panel 4: Execution Trigger<br/>Single File Ingest or Batch (2025 + 2026)"]
@@ -63,7 +63,7 @@ flowchart TD
 
     subgraph IPC["Native Python IPC Bridge (desktop_app.py)"]
         E["DesktopApi Bridge<br/>window.pywebview.api"]
-        F["File & Path Resolver<br/>find_source_file / stage_uploaded_file"]
+        F["Auto-Inspector & Path Resolver<br/>inspect_source_file / find_source_file / stage_uploaded_file"]
     end
 
     subgraph ENGINE["Core Transformation Engine (run_agent.py)"]
@@ -110,10 +110,13 @@ sequenceDiagram
     participant Engine as Ingest Engine (run_agent.py)
     participant Disk as Local File System / Excel
 
-    User->>UI: 1. Click "Browse File..." (or select 2025/2026 Preset)
+    User->>UI: 1. Click "Browse File..." next to source placeholder
     UI->>Bridge: pywebview.api.select_file()
     Bridge->>Disk: Open Native Windows OpenFileDialog (.xlsx, .csv)
-    Disk-->>UI: Return selected filepath & file size
+    Bridge->>Engine: inspect_source_file(selected_path)
+    Engine-->>Bridge: Auto-detect total line records & unique journal headers
+    Bridge-->>UI: Return filepath, file size, total_rows & total_journals
+    UI->>UI: Populate path input & display "Auto-Detected (N lines, M journals)"
 
     User->>UI: 2. Click "Browse Save Location..." & enter Custom Output Filename
     UI->>Bridge: pywebview.api.select_folder()
@@ -196,22 +199,21 @@ The application window is organized into a **12-column split-grid workbench** wi
 +-------------------------------------------------------+-------------------------------------------+
 |  [1] SOURCE ACCOUNTING FILE              .XLSX & .CSV |  ● ● ● Desktop Process Execution Console  |
 |  +-----------------------------------+ [Browse File]  |  [System] Engine Initialized.             |
-|  | .\source\Accounting_Journal...    |                |  >>> STARTING WORKDAY EIB INGESTION...    |
-|  +-----------------------------------+                |  [Config] Source: ...                     |
-|  QUICK SELECT: [2026 Source] [2025 Source] [Sample]   |  [Config] Template: v45.1                 |
-|  Active Source: ...        ✓ LineMemo Strict Blank    |  [Ingest] Mapped 222 records              |
-|                                                       |  [SpendCategory] Looked up 56 accounts    |
-|  [2] SAVE DESTINATION & CUSTOM OUTPUT FILENAME        |  [Balance] Debits == Credits ($0.00)      |
-|  +-----------------------------------+ [Browse Save]  |  >>> INGESTION FINISHED: SUCCESS          |
-|  | C:\CSV to EIB\output              |                +-------------------------------------------+
-|  +-----------------------------------+                |  ● INGESTION COMPLETED (100% BALANCED)    |
-|  Output File Name (Enter Your Custom Name):           |  Generated: ... (222 rows, balanced)      |
+|  | Select or browse source account.. |                |  [Engine] Auto-detected file structure:   |
+|  +-----------------------------------+                |  >>> STARTING WORKDAY EIB INGESTION...    |
+|  Active Source: Auto-detects upon file upload         |  [Config] Source: ...                     |
+|                                                       |  [Config] Template: v45.1                 |
+|  [2] SAVE DESTINATION & CUSTOM OUTPUT FILENAME        |  [Ingest] Mapped records                  |
+|  +-----------------------------------+ [Browse Save]  |  [SpendCategory] Looked up accounts       |
+|  | C:\CSV to EIB\output              |                |  [Balance] Debits == Credits ($0.00)      |
+|  +-----------------------------------+                |  >>> INGESTION FINISHED: SUCCESS          |
+|  Output File Name (Enter Your Custom Name):           +-------------------------------------------+
+|  +--------------------------------------------------+ |  ● INGESTION COMPLETED (100% BALANCED)    |
+|  | My_Custom_Workday_Journal                  .xlsx | |  Generated: ... (balanced)                |
 |  +--------------------------------------------------+ |  [   Open in Excel   ] [ Open in Explorer]|
-|  | My_Custom_Workday_Journal                  .xlsx | +-------------------------------------------+
-|  +--------------------------------------------------+ |  DEBIT/CREDIT BALANCE | LINEMEMO HANDLING |
-|                                                       |  $0.00 Variance (100%)| Strict Blank (0)  |
-|  [3] TARGET WORKDAY EIB TEMPLATE      [v45.1 Selected]|                                           |
-|  +------------+ +------------+ +--------+ +--------+  |                                           |
+|                                                       +-------------------------------------------+
+|  [3] TARGET WORKDAY EIB TEMPLATE      [v45.1 Selected]|  DEBIT/CREDIT BALANCE | LINEMEMO HANDLING |
+|  +------------+ +------------+ +--------+ +--------+  |  $0.00 Variance (100%)| Strict Blank (0)  |
 |  | v45.1      | | v46.0      | | v47.0  | | v48.0  |  |                                           |
 |  | Two-Sheet  | | Single-Sht | | 96 Col | | 1:1 WT |  |                                           |
 |  +------------+ +------------+ +--------+ +--------+  |                                           |
@@ -227,11 +229,11 @@ The application window is organized into a **12-column split-grid workbench** wi
 | Component / Panel | UI Elements & Controls | Underlying Function & Behavior |
 | :--- | :--- | :--- |
 | **Top Native Titlebar** | • Application Identity Badge<br>• **`Explorer`** Quick Button<br>• **`Open Excel`** Quick Button<br>• **`Local Engine Active`** Pulse Indicator | Provides global one-click access to open the output folder in Windows File Explorer (`openOutputFolder()`) or open the most recently generated workbook in Microsoft Excel (`openInExcel()`). |
-| **Panel `1`: Source Accounting File** | • Read-only Source File Path Display (`#sourcePathInput`)<br>• **`Browse File...`** Button<br>• **Quick Select Presets**: `2026 Source (222 Lines)`, `2025 Source (8 Lines)`, `Load Workspace Sample CSV`<br>• Active Source Status Pill | Opens the native Windows file picker (`DesktopApi.select_file()`) filtered for `.xlsx`, `.xls`, and `.csv` files. Includes automatic HTML `<input type="file">` base64 staging fallback (`DesktopApi.stage_uploaded_file()`) so any local file can be uploaded and staged cleanly. |
+| **Panel `1`: Source Accounting File** | • Source File Input Box (`#sourcePathInput`) with placeholder `"Select or browse source accounting file..."`<br>• **`Browse File...`** Button<br>• **Auto-Detect Active Source Pill** (`#sourceFileNameLabel`) | Opens the native Windows file picker (`DesktopApi.select_file()`) filtered for `.xlsx`, `.xls`, and `.csv` files (or HTML `<input type="file">` base64 staging via `DesktopApi.stage_uploaded_file()`). Immediately upon file upload/selection, the engine inspects the file (`DesktopApi.inspect_source_file()`) and automatically detects the record count, unique journal headers, and schema. |
 | **Panel `2`: Save Destination & Custom Output Filename** | • Destination Directory Path (`#saveLocationInput`)<br>• **`Browse Save Location...`** Button (`#btnBrowseFolder`)<br>• **Custom Output File Name Input** (`#outputFileNameInput`) with automatic `.xlsx` suffix badge | Lets the user pick any local or network folder via the native Windows Folder Browser dialog (`DesktopApi.select_folder()`) and type a custom output filename (e.g., `Workday_Journal_LE01_Jan2026`). Automatically appends `.xlsx` if omitted. |
 | **Panel `3`: Target Workday EIB Template** | • 4 Interactive Template Cards:<br>&nbsp;&nbsp;1. **`v45.1`** (`Import_Accounting_Journal_v45.1.template.xlsx`)<br>&nbsp;&nbsp;2. **`v46.0`** (`Submit_Accounting_Journal_v46.0.xlsx`)<br>&nbsp;&nbsp;3. **`v47.0`** (`Submit_Accounting_Journal_v47.0.xlsx`)<br>&nbsp;&nbsp;4. **`v48.0`** (`Submit_Accounting_Journal_v48.0.xlsx`) | Dynamically switches the target Workday EIB architecture (`selectTemplate()`). Automatically routes the engine between the **Two-Sheet relational mapper** (`v45.1`) and the **Single-Sheet 96-column mapper** (`v46.0`–`v48.0`). |
-| **Panel `4`: Actions & Execution** | • **`Ingest & Generate EIB Spreadsheet`** Primary Button (`#btnProcess`)<br>• **`Process Both (2025 + 2026)`** Batch Button | Validates that an output filename is entered, disables buttons during processing to prevent race conditions, invokes `DesktopApi.process_journal()` (or `DesktopApi.process_both()`), and streams execution results to the console. |
-| **Right Top: Desktop Process Execution Console** | • macOS/Windows Terminal Window (`#terminalLog`)<br>• Color-coded telemetry lines (`[Config]`, `[Ingest]`, `[SpendCategory]`, `[Balance]`, `[LineMemo]`, `[Saved]`)<br>• **`Clear`** Console Button | Displays real-time step-by-step execution logs: active source path, selected EIB template, number of records mapped, Spend Category matches, total Debits/Credits, net variance check, and final saved file path. |
+| **Panel `4`: Actions & Execution** | • **`Ingest & Generate EIB Spreadsheet`** Primary Button (`#btnProcess`)<br>• **`Process Both (2025 + 2026)`** Batch Button | Validates that a source file and output filename are selected, disables buttons during processing to prevent race conditions, invokes `DesktopApi.process_journal()` (or `DesktopApi.process_both()`), and streams execution results to the console. |
+| **Right Top: Desktop Process Execution Console** | • macOS/Windows Terminal Window (`#terminalLog`)<br>• Color-coded telemetry lines (`[Engine]`, `[Config]`, `[Ingest]`, `[SpendCategory]`, `[Balance]`, `[LineMemo]`, `[Saved]`)<br>• **`Clear`** Console Button | Displays real-time step-by-step execution logs: auto-detected source structure, selected EIB template, number of records mapped, Spend Category matches, total Debits/Credits, net variance check, and final saved file path. |
 | **Right Middle: Execution Status & Post-Process Action Center** | • Live Status Badge (`#execBadge`) & Timestamp (`#execTimestamp`)<br>• Summary Message (`#execMessage`)<br>• **`Open in Excel`** & **`Open in Explorer`** Action Buttons | Highlights completion status (`INGESTION COMPLETED (100% BALANCED)`) and provides immediate post-ingestion buttons to inspect the generated `.xlsx` workbook in Excel or select it in Windows File Explorer (`explorer /select,`). |
 | **Right Bottom: Integrity Summary Cards & Footer Bar** | • **Debit / Credit Balance Card**: `$0.00 Variance (100%)`<br>• **LineMemo Handling Card**: `Strict Blank (0 NULL)`<br>• **Footer Status Bar**: Engine state, active template architecture, and Native IPC indicator | Confirms at a glance that financial balancing rules and strict blank/null sanitization rules are active. |
 
@@ -242,18 +244,13 @@ The application window is organized into a **12-column split-grid workbench** wi
 ### Method A: Using the Enterprise Desktop Application (`WorkdayEIBStudio.exe`)
 
 > [!TIP]
-> **No Python installation is required** to run the standalone executable. Download [`WorkdayEIBStudio.exe`](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.0.0/WorkdayEIBStudio.exe) from the [**Releases**](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases) page and double-click it to launch.
+> **No Python installation is required** to run the standalone executable. Download [`WorkdayEIBStudio.exe`](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.1.0/WorkdayEIBStudio.exe) from the [**Releases**](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases) page and double-click it to launch.
 
-#### Step 1 — Upload or Select Your Source Accounting File (Panel 1)
-You can load your raw accounting file (`.xlsx` or `.csv`) in two ways:
-1. **Upload / Browse Any Local File**:
-   - Click the **`Browse File...`** button in **Panel 1 (`Source Accounting File`)**.
-   - In the native Windows Open File dialog, choose your raw accounting Excel (`.xlsx`) or CSV (`.csv`) file from anywhere on your computer (e.g., `Downloads`, `Desktop`, `Documents`, or a shared drive).
+#### Step 1 — Browse & Upload Your Source Accounting File (Panel 1)
+1. Next to the `"Select or browse source accounting file..."` input box in **Panel 1 (`Source Accounting File`)**, click the **`Browse File...`** button.
+2. In the native Windows Open File dialog, choose your raw accounting Excel (`.xlsx`) or CSV (`.csv`) file from anywhere on your computer (e.g., `Downloads`, `Desktop`, `Documents`, or a shared drive).
+3. **Automatic Engine Detection**: Immediately after selecting the file, the engine (`DesktopApi.inspect_source_file()`) inspects the file, detects the total line count and unique journal header count, updates the **Active Source** indicator (`<filename> — Auto-Detected (N lines, M journals)`), and logs the detected structure in the console.
    - *Fallback Support*: If running in an environment where native dialogs are restricted, the app automatically falls back to an HTML file uploader and stages the uploaded file bytes into `%TEMP%\WorkdayEIBStudio_Staged\` via `stage_uploaded_file()`.
-2. **Use Built-In Quick Select Presets**:
-   - Click **`2026 Source (222 Lines)`** to load `Accounting_Journal_Raw_LE01_202601.xlsx`.
-   - Click **`2025 Source (8 Lines)`** to load `Accounting_Journal_Raw_LE01_202501.xlsx`.
-   - Click **`Load Workspace Sample CSV`** to load the sample CSV dataset.
 
 #### Step 2 — Choose Save Destination & Enter Output Filename (Panel 2)
 1. **Select Destination Folder**:
