@@ -3,6 +3,7 @@ import sys
 import csv
 import math
 import re
+import difflib
 import argparse
 import datetime
 import shutil
@@ -441,10 +442,14 @@ def _tokenize_words(name):
 _WORKDAY_FIELD_ALIASES = {
     "intercompanyaffiliate": [
         "Worktag_Intercompany_Affiliate_ID", "IntercompanyAffiliate", "Intercompany Affiliate",
-        "Intercompany_Affiliate_ID", "Intercompany_Affiliate", "Worktag_Affiliate_ID",
-        "Affiliate", "Affiliate_ID", "AffiliateID", "Intercompany_Company_ID",
-        "IntercompanyCompany", "Intercompany", "IC_Affiliate", "ICAffiliate",
-        "TradingPartner", "Trading_Partner", "Trading Partner", "TradingPartnerID"
+        "Intercompany_Affiliate_ID", "Intercompany_Affiliate", "Worktag_Intercompany_Affliate_ID",
+        "IntercompanyAffliate", "Intercompany Affliate", "Intercompany_Affliate_ID", "Intercompany_Affliate",
+        "Worktag_Affiliate_ID", "Affiliate", "Affiliate_ID", "AffiliateID",
+        "Affiliate Company", "Affiliate_Company", "Affiliate_Company_ID",
+        "Intercompany_Company_ID", "IntercompanyCompany", "Intercompany",
+        "IntercoAffiliate", "Interco Affiliate", "Interco_Affiliate_ID", "Interco_Affiliate",
+        "IC_Affiliate", "ICAffiliate", "TradingPartner", "Trading_Partner", "Trading Partner",
+        "TradingPartnerID", "Intercompany_Partner", "Intercompany Partner"
     ],
     "balancingworktagaffiliate": [
         "Worktag_Business_Unit_ID", "OptionalBalancingWorktags_Business_Unit_ID",
@@ -702,6 +707,29 @@ def discover_sheet_mappings(source_columns, ws, handled_target_cols, handled_sou
                     matched_src = src
                     match_method = "token_set"
                     break
+
+        # 5. High-confidence fuzzy match (>= 0.88) for near-identical names / minor typos (e.g. Affliate <-> Affiliate)
+        if not matched_src and len(t_norm) >= 6:
+            best_ratio = 0.0
+            best_src = None
+            for src in source_columns:
+                if src in claimed_sources:
+                    continue
+                s_low = str(src).strip().lower()
+                if any(s_low.endswith(sfx) for sfx in _SKIP_SOURCE_SUFFIXES):
+                    continue
+                if is_header_sheet and (_norm_token(src) in header_disallowed_sources or s_low.startswith("worktag_")):
+                    continue
+                s_strip = _strip_workday_token(src)
+                if len(s_strip) < 6:
+                    continue
+                ratio = difflib.SequenceMatcher(None, s_strip, t_norm).ratio()
+                if ratio >= 0.88 and ratio > best_ratio:
+                    best_ratio = ratio
+                    best_src = src
+            if best_src:
+                matched_src = best_src
+                match_method = "fuzzy"
 
         if matched_src:
             claimed_targets.add(c_idx)
