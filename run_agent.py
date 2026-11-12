@@ -2,10 +2,13 @@ import os
 import sys
 import csv
 import math
+import re
 import argparse
 import datetime
 import shutil
 import openpyxl
+
+MAX_BULK_FILES = 12
 
 class _IlocIndexer:
     def __init__(self, rows):
@@ -14,9 +17,15 @@ class _IlocIndexer:
         return self._rows[idx]
 
 class _LightweightDataFrame:
-    def __init__(self, rows):
+    def __init__(self, rows, columns=None):
         self._rows = rows
         self.iloc = _IlocIndexer(rows)
+        if columns is not None:
+            self.columns = list(columns)
+        elif rows:
+            self.columns = list(rows[0].keys())
+        else:
+            self.columns = []
     def __len__(self):
         return len(self._rows)
     def iterrows(self):
@@ -52,14 +61,20 @@ class _PandasLite:
         return not _PandasLite.isna(val)
 
     @staticmethod
-    def read_excel(path):
-        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-        ws = wb.active
+    def _extract_excel_sheet(ws):
         rows_iter = ws.iter_rows(values_only=True)
-        header_row = next(rows_iter, None)
+        header_row = None
+        # Look in rows 1..10 for the real header row (Row 1 works immediately for standard files)
+        for _ in range(10):
+            cand = next(rows_iter, None)
+            if cand is None:
+                break
+            non_empty = [v for v in cand if v is not None and str(v).strip() != ""]
+            if len(non_empty) >= 2:
+                header_row = cand
+                break
         if not header_row:
-            wb.close()
-            return _LightweightDataFrame([])
+            return [], []
         headers = [str(h).strip() if h is not None else f"Unnamed: {i}" for i, h in enumerate(header_row)]
         records = []
         for r in rows_iter:
@@ -72,14 +87,31 @@ class _PandasLite:
                     val = None
                 row_dict[h] = val
             records.append(row_dict)
+        return records, headers
+
+    @staticmethod
+    def read_excel(path):
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        ws = wb.active
+        records, headers = _PandasLite._extract_excel_sheet(ws)
+        if not records and len(wb.sheetnames) > 1:
+            for sname in wb.sheetnames:
+                cand_records, cand_headers = _PandasLite._extract_excel_sheet(wb[sname])
+                if len(cand_headers) >= 2 and (cand_records or not headers):
+                    records, headers = cand_records, cand_headers
+                    if cand_records:
+                        break
         wb.close()
-        return _LightweightDataFrame(records)
+        return _LightweightDataFrame(records, columns=headers)
 
     @staticmethod
     def read_csv(path):
         records = []
+        headers = []
         with open(path, mode="r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
+            if reader.fieldnames:
+                headers = [h.strip() for h in reader.fieldnames if h is not None]
             for r in reader:
                 if not r or all(v is None or str(v).strip() == "" for v in r.values()):
                     continue
@@ -88,7 +120,7 @@ class _PandasLite:
                     if k is not None:
                         row_dict[k.strip()] = _parse_csv_val(v)
                 records.append(row_dict)
-        return _LightweightDataFrame(records)
+        return _LightweightDataFrame(records, columns=headers)
 
 pd = _PandasLite()
 
@@ -248,20 +280,36 @@ def load_spend_category_map(mapping_file=None):
         print(f"Error loading spend category map: {e}")
     return spend_map
 
-def get_output_filename(source_file):
-    """Returns official Workday EIB filename matching strict standard:
-    - 2025: Import_Accounting_Journal_v45.0_LE01_2025_P1.xlsx
-    - 2026: Import_Accounting_Journal_v45.0_LE01_2026_P2.xlsx
-    """
-    if "2025" in str(source_file):
-        return "Import_Accounting_Journal_v45.0_LE01_2025_P1.xlsx"
-    else:
-        return "Import_Accounting_Journal_v45.0_LE01_2026_P2.xlsx"
+def _detect_template_version_tag(template_file=None):
+    if not template_file:
+        return "v45.1"
+    low = str(template_file).lower()
+    if "v48" in low:
+        return "v48.0"
+    if "v47" in low:
+        return "v47.0"
+    if "v46" in low:
+        return "v46.0"
+    return "v45.1"
+
+def get_output_filename(source_file, template_file=None):
+    """Returns official Workday EIB filename for standard LE01 files, or unique filename for custom uploads."""
+    bname = os.path.basename(str(source_file or ""))
+    low = bname.lower()
+    tpl_ver = _detect_template_version_tag(template_file)
+    if tpl_ver == "v45.1":
+        if "accounting_journal_raw" in low and "2025" in low:
+            return "Import_Accounting_Journal_v45.0_LE01_2025_P1.xlsx"
+        if "accounting_journal_raw" in low and "2026" in low:
+            return "Import_Accounting_Journal_v45.0_LE01_2026_P2.xlsx"
+    stem = os.path.splitext(bname)[0] or "Accounting_Journal"
+    prefix = "Import_Accounting_Journal" if tpl_ver == "v45.1" else "Submit_Accounting_Journal"
+    return f"{stem}_{prefix}_{tpl_ver}.xlsx"
 
 def get_datewise_output_path(source_file, target_dir=None, template_file=None):
     """Generates the output path. If target_dir is given by user, writes directly there.
     Otherwise defaults to date-wise output/YYYY-MM-DD/ and synchronized root copy."""
-    filename = get_output_filename(source_file)
+    filename = get_output_filename(source_file, template_file=template_file)
     if target_dir and os.path.exists(target_dir) and os.path.isdir(target_dir):
         return os.path.join(target_dir, filename)
     date_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -273,9 +321,9 @@ def to_yn(val):
     if pd.isna(val) or val is None:
         return None
     val_str = str(val).strip()
-    if val_str in ("1", "1.0", "Y", "True", "true"):
+    if val_str in ("1", "1.0", "Y", "y", "True", "true", "YES", "yes"):
         return "Y"
-    elif val_str in ("0", "0.0", "N", "False", "false"):
+    elif val_str in ("0", "0.0", "N", "n", "False", "false", "NO", "no"):
         return "N"
     return None
 
@@ -307,6 +355,8 @@ def clean_amount(val):
     if pd.isna(val) or val is None or str(val).strip() == "" or str(val).strip().upper() in ("NULL", "NONE", "NAN"):
         return None
     try:
+        if isinstance(val, str):
+            val = val.replace(",", "").replace("$", "").strip()
         return round(float(val), 2)
     except (ValueError, TypeError):
         return None
@@ -341,14 +391,455 @@ def clean_cost_center(val):
 def parse_date(val):
     if pd.isna(val) or val is None or str(val).strip() == "":
         return None
+    if isinstance(val, (datetime.datetime, datetime.date)):
+        return val.date() if isinstance(val, datetime.datetime) else val
     val_str = str(val).strip().split()[0]
-    try:
-        parts = [int(p) for p in val_str.split("-")]
-        if len(parts) == 3:
-            return datetime.date(parts[0], parts[1], parts[2])
-    except Exception:
-        pass
+    for sep in ("-", "/"):
+        if sep in val_str:
+            parts = val_str.split(sep)
+            if len(parts) == 3 and all(p.isdigit() for p in parts):
+                try:
+                    if len(parts[0]) == 4:
+                        return datetime.date(int(parts[0]), int(parts[1]), int(parts[2]))
+                    if len(parts[2]) == 4:
+                        return datetime.date(int(parts[2]), int(parts[0]), int(parts[1]))
+                except Exception:
+                    pass
     return val_str
+
+# ==============================================================================
+# DYNAMIC SOURCE & TARGET SCHEMA ANALYZER + AUTO-MAPPER
+# ==============================================================================
+def _norm_token(name):
+    if name is None:
+        return ""
+    s = str(name).strip().rstrip("*+").strip().lower()
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+def _strip_workday_token(name):
+    if name is None:
+        return ""
+    s = str(name).strip().rstrip("*+").strip().lower()
+    for pfx in ("worktag_", "optionalbalancingworktags_", "optional_balancing_worktags_", "line_", "journal_", "header_"):
+        if s.startswith(pfx):
+            s = s[len(pfx):]
+    for sfx in ("_reference_id", "_ref_id", "_id", "_code", "_ref"):
+        if s.endswith(sfx):
+            s = s[:-len(sfx)]
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+def _tokenize_words(name):
+    if name is None:
+        return set()
+    s = str(name).strip().rstrip("*+")
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
+    parts = [p.lower() for p in re.split(r"[^a-zA-Z0-9]+", s) if p]
+    drop = {"worktag", "optionalbalancingworktags", "optional", "balancing", "reference", "id", "ref"}
+    filtered = {p for p in parts if p not in drop}
+    return filtered or set(parts)
+
+_WORKDAY_FIELD_ALIASES = {
+    "intercompanyaffiliate": [
+        "Worktag_Intercompany_Affiliate_ID", "IntercompanyAffiliate", "Intercompany Affiliate",
+        "Intercompany_Affiliate_ID", "Intercompany_Affiliate", "Worktag_Affiliate_ID",
+        "Affiliate", "Affiliate_ID", "AffiliateID", "Intercompany_Company_ID",
+        "IntercompanyCompany", "Intercompany", "IC_Affiliate", "ICAffiliate",
+        "TradingPartner", "Trading_Partner", "Trading Partner", "TradingPartnerID"
+    ],
+    "balancingworktagaffiliate": [
+        "Worktag_Business_Unit_ID", "OptionalBalancingWorktags_Business_Unit_ID",
+        "BalancingWorktagAffiliate", "Balancing Worktag Affiliate", "Balancing_Worktag_Affiliate",
+        "BusinessUnit", "Business Unit", "Business_Unit_ID"
+    ],
+    "balancingworktag": [
+        "BalancingWorktag", "Balancing Worktag", "Header_Business_Unit_ID",
+        "OptionalBalancingWorktags_Business_Unit_ID", "Worktag_Business_Unit_ID"
+    ],
+    "costcenter": [
+        "Worktag_Cost_Center_Reference_ID", "CostCenter", "Cost Center",
+        "Cost_Center_Reference_ID", "Cost_Center_ID", "CostCenterID"
+    ],
+    "spendcategory": [
+        "Worktag_Spend_Category_ID", "SpendCategory", "Spend Category", "Spend_Category_ID"
+    ],
+    "revenuecategory": [
+        "Worktag_Revenue_Category_ID", "RevenueCategory", "Revenue Category", "Revenue_Category_ID"
+    ],
+    "customorganization": [
+        "Worktag_Custom_Organization_Reference_ID", "CustomOrganization",
+        "Custom Organization", "Custom_Organization_Reference_ID"
+    ],
+    "region": [
+        "Worktag_Region_Reference_ID", "Region", "Region_Reference_ID", "RegionID"
+    ],
+    "bankaccount": [
+        "Worktag_Bank_Account_ID", "BankAccount", "Bank Account", "Bank_Account_ID"
+    ],
+    "loan": [
+        "Worktag_Loan_ID", "Loan", "Loan_ID"
+    ],
+    "customworktag1": ["Worktag_Custom_Worktag_1_ID", "CustomWorktag1", "Custom Worktag 1"],
+    "customworktag2": ["Worktag_Custom_Worktag_2_ID", "CustomWorktag2", "Custom Worktag 2"],
+    "customworktag3": ["Worktag_Custom_Worktag_3_ID", "CustomWorktag3", "Custom Worktag 3"],
+    "customworktag4": ["Worktag_Custom_Worktag_4_ID", "CustomWorktag4", "Custom Worktag 4"],
+    "customworktag5": ["Worktag_Custom_Worktag_5_ID", "CustomWorktag5", "Custom Worktag 5"],
+    "supplier": ["Worktag_Supplier_ID", "Supplier", "Supplier_ID", "SupplierReferenceID", "Vendor", "VendorID"],
+    "customer": ["Worktag_Customer_ID", "Customer", "Customer_ID", "CustomerReferenceID"],
+    "fund": ["Worktag_Fund_ID", "Fund", "Fund_ID"],
+    "grant": ["Worktag_Grant_ID", "Grant", "Grant_ID"],
+    "program": ["Worktag_Program_ID", "Program", "Program_ID"],
+    "project": ["Worktag_Project_ID", "Project", "Project_ID"],
+    "location": ["Worktag_Location_ID", "Location", "Location_ID"],
+    "taxcode": ["TaxCode", "Tax Code", "Tax_Code_ID"],
+    "taxrate": ["TaxRate", "Tax Rate", "Tax_Rate_ID"],
+    "taxtype": ["TaxType", "Tax Type", "Tax_Type_ID"],
+    "taxapplicability": ["TaxApplicability", "Tax Applicability", "Tax_Applicability_ID"],
+    "documentlink": ["DocumentLink", "Document Link"],
+    "bookcode": ["BookCode", "Book Code", "Book_Code_ID"],
+    "journalnumber": ["JournalNumber", "Journal Number"],
+    "adjustmentjournal": ["AdjustmentJournal", "Adjustment Journal"],
+    "includetaxlines": ["IncludeTaxLines", "Include Tax Lines"],
+    "createreversal": ["CreateReversal", "Create Reversal"],
+    "reversaldate": ["ReversalDate", "Reversal Date"],
+    "controltotalamount": ["ControlTotalAmount", "Control Total Amount"],
+    "currencyratetype": ["CurrencyRateType", "Currency Rate Type", "Currency_Rate_Type_ID"],
+    "currencyrate": ["CurrencyRate", "Currency Rate"],
+    "quantity": ["Quantity", "Qty"],
+    "unitofmeasure": ["UnitOfMeasure", "Unit of Measure", "UOM"],
+    "excludefromspendreport": ["ExcludeFromSpendReport", "Exclude from Spend Report"],
+    "externalbusinessentityname": ["ExternalBusinessEntityName", "External Business Entity Name"],
+    "externalbusinessentityaddress": ["ExternalBusinessEntityAddress", "External Business Entity Address"],
+    "externalbusinessentitytaxid": ["ExternalBusinessEntityTaxID", "External Business Entity Tax ID"],
+    "externalsupplierinvoicesource": ["ExternalSupplierInvoiceSource", "External Supplier Invoice Source", "External_Supplier_Invoice_Source_ID"],
+}
+
+_CORE_SOURCE_ALIASES = {
+    "headerkey": ["HeaderKey", "Header Key", "Header_Key", "SpreadsheetKey", "Spreadsheet Key"],
+    "journalkey": ["AccountingJournalID", "Accounting Journal ID", "JournalKey", "Journal Key", "JournalID", "Journal ID"],
+    "addonly": ["AddOnlyJournal", "Add Only Journal", "Add Only", "AddOnly"],
+    "submit": ["Submit", "SubmitJournal"],
+    "company": ["CompanyReferenceID", "Company Reference ID", "Company_Reference_ID", "Company", "CompanyCode", "Company Code", "LegalEntity"],
+    "currency": ["Currency", "CurrencyCode", "Currency Code", "Currency_ID"],
+    "ledgertype": ["LedgerType", "Ledger Type", "Ledger_Type_ID"],
+    "bookcode": ["BookCode", "Book Code", "Book_Code_ID"],
+    "accountingdate": ["AccountingDate", "Accounting Date", "PostingDate", "Posting Date", "TransactionDate", "JournalDate"],
+    "journalsource": ["JournalSource", "Journal Source"],
+    "journalentrymemo": ["JournalEntryMemo", "Journal Entry Memo", "HeaderMemo", "Header Memo"],
+    "journalextref": ["JournalExternalReferenceID", "Journal External Reference ID", "HeaderExternalReferenceID"],
+    "journalnumber": ["JournalNumber", "Journal Number"],
+    "row_id": ["ROW_ID", "RowID", "Row ID", "LineKey", "Line Key"],
+    "lineorder": ["LineOrder", "Line Order", "ROW_ID", "RowID"],
+    "linecompany": ["LineCompanyReferenceID", "Line Company Reference ID", "LineCompany", "Line Company", "CompanyReferenceID", "Company"],
+    "ledgeraccount": ["LedgerAccountReferenceID", "Ledger Account Reference ID", "LedgerAccount", "Ledger Account", "GLAccount", "GL Account", "Account", "AccountNumber"],
+    "accountset": ["LedgerAccountReferenceID_ParentID", "AccountSet", "Account Set", "Account_Set_ID"],
+    "debitamount": ["DebitAmount", "Debit Amount", "Debit", "DrAmount", "Dr"],
+    "creditamount": ["CreditAmount", "Credit Amount", "Credit", "CrAmount", "Cr"],
+    "linecurrency": ["LineCurrency", "Line Currency", "Currency", "CurrencyCode"],
+    "linememo": ["LineMemo", "Line Memo", "Memo", "LineDescription", "Description"],
+    "lineextref": ["JournalLineExternalReferenceID", "Journal Line External Reference ID", "LineExternalReferenceID"],
+    "budgetdate": ["BudgetDate", "Budget Date"],
+    "revenuecategory": _WORKDAY_FIELD_ALIASES["revenuecategory"],
+    "spendcategory": _WORKDAY_FIELD_ALIASES["spendcategory"],
+    "costcenter": _WORKDAY_FIELD_ALIASES["costcenter"],
+    "intercompanyaffiliate": _WORKDAY_FIELD_ALIASES["intercompanyaffiliate"],
+    "balancingworktagaffiliate": _WORKDAY_FIELD_ALIASES["balancingworktagaffiliate"],
+    "customorganization": _WORKDAY_FIELD_ALIASES["customorganization"],
+    "customworktag1": _WORKDAY_FIELD_ALIASES["customworktag1"],
+}
+
+def _build_col_lookup(source_columns):
+    """Maps raw, normalized, and stripped source column tokens to exact source column header strings."""
+    exact = {str(c): c for c in source_columns}
+    norm = {}
+    stripped = {}
+    for c in source_columns:
+        nt = _norm_token(c)
+        if nt and nt not in norm:
+            norm[nt] = c
+        st = _strip_workday_token(c)
+        if st and st not in stripped:
+            stripped[st] = c
+    return {"exact": exact, "norm": norm, "stripped": stripped}
+
+def _resolve_source_column(col_lookup, candidates):
+    for cand in candidates:
+        if cand in col_lookup["exact"]:
+            return col_lookup["exact"][cand]
+    for cand in candidates:
+        nt = _norm_token(cand)
+        if nt in col_lookup["norm"]:
+            return col_lookup["norm"][nt]
+    return None
+
+def _pick_source_val(row, col_lookup, core_key):
+    col_name = _resolve_source_column(col_lookup, _CORE_SOURCE_ALIASES.get(core_key, []))
+    if col_name is not None:
+        return row.get(col_name)
+    return None
+
+def _inspect_target_sheet(ws):
+    """Reads Row 3 (restrictions), Row 4 (Workday format ID), Row 5 (column header) for every column."""
+    cols = []
+    for c in range(1, ws.max_column + 1):
+        r3 = ws.cell(row=3, column=c).value
+        r4 = ws.cell(row=4, column=c).value
+        r5 = ws.cell(row=5, column=c).value
+        if r5 is None and r4 is None:
+            continue
+        cols.append({
+            "col_idx": c,
+            "col_letter": openpyxl.utils.get_column_letter(c),
+            "restriction": str(r3).strip() if r3 is not None else "",
+            "format": str(r4).strip() if r4 is not None else "",
+            "header": str(r5).strip() if r5 is not None else "",
+            "norm": _norm_token(r5),
+            "stripped_r4": _strip_workday_token(r4),
+            "words": _tokenize_words(r5),
+        })
+    return cols
+
+_IGNORED_TARGET_HEADERS = {"fields", "donotuse", "companieswithoutaccess", "filecontent"}
+_AMBIGUOUS_R4_FORMATS = {"text", "yn", "yyyymmdd", "company", "externalsupplierinvoicesource", "accountset", "ledgeraccount", "currency", "currencyratetype"}
+_SKIP_SOURCE_SUFFIXES = ("referenceidtype", "parentidtype", "idtype")
+
+def discover_sheet_mappings(source_columns, ws, handled_target_cols, handled_source_cols, is_header_sheet=False):
+    """
+    Analyzes both source columns and target template columns (Row 5 header + Row 4 format)
+    and automatically discovers mappings for any new or previously unmapped source/target columns.
+    """
+    target_cols = _inspect_target_sheet(ws)
+    col_lookup = _build_col_lookup(source_columns)
+
+    # Track Row 4 format frequencies so only unambiguous Row 4 IDs participate in format matching
+    r4_counts = {}
+    for tc in target_cols:
+        sr4 = tc["stripped_r4"]
+        if sr4:
+            r4_counts[sr4] = r4_counts.get(sr4, 0) + 1
+
+    # On Header sheet, avoid accidentally matching line-level columns into header slots
+    header_disallowed_sources = {
+        "row_id", "rowid", "lineorder", "debitamount", "creditamount", "linememo",
+        "linecurrency", "ledgeraccountreferenceid", "ledgeraccountreferenceidparentid",
+        "budgetdate", "linecompanyreferenceid"
+    }
+
+    discovered = []
+    claimed_targets = set(handled_target_cols)
+    claimed_sources = set(handled_source_cols)
+
+    # Skip alternate ledger block unless source explicitly mentions 'alternate'
+    has_alternate_source = any("alternate" in str(s).lower() for s in source_columns)
+
+    for tc in target_cols:
+        c_idx = tc["col_idx"]
+        t_norm = tc["norm"]
+        if c_idx in claimed_targets or not t_norm or t_norm in _IGNORED_TARGET_HEADERS:
+            continue
+        if not has_alternate_source and t_norm.startswith("alternateledger"):
+            continue
+        # Skip trailing duplicate Workday Tax/Attachment Row ID & Line Order columns after primary block
+        if t_norm in ("rowid", "lineorder") and c_idx > 40:
+            continue
+
+        matched_src = None
+        match_method = None
+
+        # 1. Alias dictionary lookup (exact Workday field variants)
+        alias_cands = _WORKDAY_FIELD_ALIASES.get(t_norm, [])
+        if alias_cands:
+            cand_src = _resolve_source_column(col_lookup, alias_cands)
+            if cand_src and cand_src not in claimed_sources:
+                if not (is_header_sheet and _norm_token(cand_src) in header_disallowed_sources):
+                    matched_src = cand_src
+                    match_method = "alias"
+
+        # 2. Direct normalized / stripped Worktag match against Row 5 header
+        if not matched_src:
+            for src in source_columns:
+                if src in claimed_sources:
+                    continue
+                s_low = str(src).strip().lower()
+                if any(s_low.endswith(sfx) for sfx in _SKIP_SOURCE_SUFFIXES):
+                    continue
+                s_norm = _norm_token(src)
+                if is_header_sheet and (s_norm in header_disallowed_sources or s_low.startswith("worktag_")):
+                    continue
+                s_strip = _strip_workday_token(src)
+                if s_norm == t_norm or (s_strip and s_strip == t_norm):
+                    matched_src = src
+                    match_method = "header_norm"
+                    break
+
+        # 3. Unique Row 4 Format ID match (e.g. Region_Reference_ID <-> Worktag_Region_Reference_ID)
+        sr4 = tc["stripped_r4"]
+        if not matched_src and sr4 and sr4 not in _AMBIGUOUS_R4_FORMATS and r4_counts.get(sr4, 0) == 1:
+            for src in source_columns:
+                if src in claimed_sources:
+                    continue
+                s_low = str(src).strip().lower()
+                if any(s_low.endswith(sfx) for sfx in _SKIP_SOURCE_SUFFIXES):
+                    continue
+                if is_header_sheet and s_low.startswith("worktag_"):
+                    continue
+                if _strip_workday_token(src) == sr4:
+                    matched_src = src
+                    match_method = "format_r4"
+                    break
+
+        # 4. Unambiguous multi-word token overlap for custom user columns
+        if not matched_src and len(tc["words"]) >= 2:
+            for src in source_columns:
+                if src in claimed_sources:
+                    continue
+                s_low = str(src).strip().lower()
+                if any(s_low.endswith(sfx) for sfx in _SKIP_SOURCE_SUFFIXES):
+                    continue
+                if is_header_sheet and (_norm_token(src) in header_disallowed_sources or s_low.startswith("worktag_")):
+                    continue
+                s_words = _tokenize_words(src)
+                if len(s_words) >= 2 and (s_words == tc["words"]):
+                    matched_src = src
+                    match_method = "token_set"
+                    break
+
+        if matched_src:
+            claimed_targets.add(c_idx)
+            claimed_sources.add(matched_src)
+            discovered.append({
+                "source_col": matched_src,
+                "target_sheet": ws.title,
+                "target_col_idx": c_idx,
+                "target_col_letter": tc["col_letter"],
+                "target_header": tc["header"],
+                "target_format": tc["format"],
+                "match_method": match_method,
+            })
+
+    return discovered
+
+def _coerce_auto_val(val, target_format):
+    fmt = (target_format or "").lower()
+    if fmt == "y/n":
+        return to_yn(val) or clean_val(val)
+    if "yyyy-mm-dd" in fmt:
+        return parse_date(val)
+    if fmt.startswith("number"):
+        return clean_amount(val)
+    return clean_val(val)
+
+def _resolve_handled_src(col_lookup, keys):
+    return {
+        c for k in keys
+        for c in [_resolve_source_column(col_lookup, _CORE_SOURCE_ALIASES[k])] if c
+    }
+
+def _plan_two_sheet_mappings(source_cols, ws_hdr, ws_line, col_lookup):
+    """Builds shared dynamic mapping plan for two-sheet v45.1 workbooks."""
+    line_hdr_cols = {
+        str(ws_line.cell(row=5, column=c).value).strip().rstrip("*+"): c
+        for c in range(1, ws_line.max_column + 1)
+        if ws_line.cell(row=5, column=c).value is not None
+    }
+    col_intercompany = line_hdr_cols.get("Intercompany Affiliate")
+    col_balancing_affiliate = line_hdr_cols.get("Balancing Worktag Affiliate", 31)
+
+    handled_hdr_tgt = {2, 3, 5, 6, 12, 13, 14, 16, 17, 21, 22, 23, 33}
+    handled_hdr_src = _resolve_handled_src(col_lookup, (
+        "headerkey", "addonly", "journalkey", "company", "currency", "ledgertype",
+        "accountingdate", "journalsource", "journalentrymemo", "journalextref"
+    ))
+    hdr_auto = discover_sheet_mappings(source_cols, ws_hdr, handled_hdr_tgt, handled_hdr_src, is_header_sheet=True)
+
+    handled_line_tgt = {2, 3, 4, 5, 6, 7, 10, 11, 12, 20, 21, 22, 23, 25, 27}
+    if col_intercompany:
+        handled_line_tgt.add(col_intercompany)
+    if col_balancing_affiliate:
+        handled_line_tgt.add(col_balancing_affiliate)
+    handled_line_src = _resolve_handled_src(col_lookup, (
+        "headerkey", "row_id", "lineorder", "linecompany", "ledgeraccount", "accountset",
+        "debitamount", "creditamount", "linecurrency", "linememo", "lineextref",
+        "budgetdate", "revenuecategory", "spendcategory", "costcenter",
+        "intercompanyaffiliate", "balancingworktagaffiliate"
+    ))
+    line_auto = discover_sheet_mappings(source_cols, ws_line, handled_line_tgt, handled_line_src, is_header_sheet=False)
+    return col_intercompany, col_balancing_affiliate, hdr_auto, line_auto
+
+def _plan_single_sheet_mappings(source_cols, ws, col_lookup):
+    """Builds shared dynamic mapping plan for single-sheet v46/v47/v48 workbooks."""
+    handled_tgt = {2, 3, 4, 5, 8, 9, 13, 15, 16, 17, 18, 19, 20, 24, 25, 26, 35, 36, 37, 38, 39, 42, 43, 44, 52, 53, 54, 55, 57, 59, 61, 63, 65}
+    handled_src = _resolve_handled_src(col_lookup, (
+        "headerkey", "addonly", "journalkey", "submit", "journalnumber", "company", "currency",
+        "ledgertype", "bookcode", "accountingdate", "journalsource", "journalentrymemo",
+        "journalextref", "row_id", "lineorder", "linecompany", "ledgeraccount", "accountset",
+        "debitamount", "creditamount", "linecurrency", "linememo", "lineextref", "budgetdate",
+        "costcenter", "spendcategory", "balancingworktagaffiliate", "customorganization",
+        "customworktag1", "revenuecategory"
+    ))
+    return discover_sheet_mappings(source_cols, ws, handled_tgt, handled_src, is_header_sheet=False)
+
+def analyze_schema(source_file, excel_template=None):
+    """Inspects both source columns and target template columns and returns mapping discovery summary."""
+    resolved_src = find_source_file(source_file)
+    if not resolved_src or not os.path.exists(resolved_src):
+        resolved_src = str(source_file)
+    tpl_path = resolve_target_file(excel_template) if excel_template else resolve_target_file("v45")
+
+    df = load_source_dataframe(resolved_src)
+    source_cols = list(df.columns) if hasattr(df, "columns") and df.columns else (list(df.iloc[0].keys()) if len(df) > 0 else [])
+
+    populated_cols = [
+        c for c in source_cols
+        if any(pd.notna(r.get(c)) and str(r.get(c)).strip() != "" for _, r in df.iterrows())
+    ]
+
+    wb = openpyxl.load_workbook(tpl_path, data_only=True, read_only=True)
+    is_two_sheet = (SHEET_HEADER in wb.sheetnames and SHEET_LINES in wb.sheetnames)
+    col_lookup = _build_col_lookup(source_cols)
+
+    auto_mappings = []
+    target_col_summary = {}
+
+    if is_two_sheet:
+        ws_hdr = wb[SHEET_HEADER]
+        ws_line = wb[SHEET_LINES]
+        target_col_summary[SHEET_HEADER] = ws_hdr.max_column
+        target_col_summary[SHEET_LINES] = ws_line.max_column
+        _, _, hdr_auto, line_auto = _plan_two_sheet_mappings(source_cols, ws_hdr, ws_line, col_lookup)
+        auto_mappings.extend(hdr_auto)
+        auto_mappings.extend(line_auto)
+    else:
+        sheet_name = "Submit Accounting Journal" if "Submit Accounting Journal" in wb.sheetnames else wb.sheetnames[0]
+        ws = wb[sheet_name]
+        target_col_summary[sheet_name] = ws.max_column
+        auto_mappings.extend(_plan_single_sheet_mappings(source_cols, ws, col_lookup))
+
+    wb.close()
+
+    mapped_src_set = {
+        c for k in _CORE_SOURCE_ALIASES
+        for c in [_resolve_source_column(col_lookup, _CORE_SOURCE_ALIASES[k])] if c
+    }
+    mapped_src_set.update(m["source_col"] for m in auto_mappings)
+
+    unmapped_populated = [
+        c for c in populated_cols
+        if c not in mapped_src_set and not any(str(c).lower().endswith(sfx) for sfx in _SKIP_SOURCE_SUFFIXES) and _norm_token(c) not in ("recordquantity", "accountingjournalreferenceid")
+    ]
+
+    interco_src = _resolve_source_column(col_lookup, _CORE_SOURCE_ALIASES["intercompanyaffiliate"])
+    return {
+        "source_file": resolved_src,
+        "template_file": tpl_path,
+        "template_version": _detect_template_version_tag(tpl_path),
+        "total_rows": len(df),
+        "source_columns": source_cols,
+        "populated_source_columns": populated_cols,
+        "target_sheets": target_col_summary,
+        "intercompany_source_col": interco_src,
+        "auto_discovered_mappings": auto_mappings,
+        "unmapped_populated_columns": unmapped_populated,
+    }
 
 def select_file_interactive(prompt_title, options, default_index=0):
     """Displays a numbered menu in terminal and returns the selected option."""
@@ -402,13 +893,23 @@ def load_source_dataframe(source_path):
 # ==============================================================================
 # CODE FOR 2026 MAPPING
 # ==============================================================================
+def _safe_int_or_val(val, fallback):
+    if val is None or pd.isna(val):
+        return fallback
+    s = str(val).strip()
+    if s.endswith(".0") and s[:-2].isdigit():
+        return int(s[:-2])
+    if s.isdigit():
+        return int(s)
+    return s or fallback
+
 def process_journal_2026(source_file, excel_template, output_file=None, output_dir=None):
     # Load Spend Category lookup map
     spend_map = load_spend_category_map()
 
     # Determine date-wise or user-selected output path
     custom_output = output_file is not None
-    datewise_target = get_datewise_output_path(source_file, target_dir=output_dir)
+    datewise_target = get_datewise_output_path(source_file, target_dir=output_dir, template_file=excel_template)
     if output_file is None:
         output_file = datewise_target
 
@@ -426,6 +927,8 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
         raise PermissionError(f"'{output_file}' is open in Excel.")
 
     df = load_source_dataframe(source_file)
+    source_cols = list(df.columns) if hasattr(df, "columns") and df.columns else (list(df.iloc[0].keys()) if len(df) > 0 else [])
+    col_lookup = _build_col_lookup(source_cols)
 
     print(f"Loading base Excel template: {excel_template}...")
     wb = openpyxl.load_workbook(excel_template)
@@ -445,11 +948,24 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
             print(f"Clearing Sheet '{SHEET_LINES}' data rows 6 to {ws_line.max_row}...")
             ws_line.delete_rows(6, ws_line.max_row - 5)
 
+        # Resolve Header & Line column maps dynamically from Row 5 headers & auto-discover extra columns
+        col_intercompany, col_balancing_affiliate, hdr_auto_mappings, line_auto_mappings = _plan_two_sheet_mappings(
+            source_cols, ws_hdr, ws_line, col_lookup
+        )
+        all_auto_mappings = hdr_auto_mappings + line_auto_mappings
+
+        if all_auto_mappings:
+            print(f"Auto-Discovered {len(all_auto_mappings)} Additional Column Mapping(s):")
+            for am in all_auto_mappings:
+                print(f"  + [{am['target_sheet']}] '{am['source_col']}' -> Col {am['target_col_letter']} ({am['target_header']}) via {am['match_method']}")
+
         # Identify unique journals while preserving appearance order
         unique_headers = []
         seen_keys = []
         for _, row in df.iterrows():
-            key = row.get("HeaderKey") if "HeaderKey" in row and pd.notna(row.get("HeaderKey")) else (row.get("JournalKey") or row.get("AccountingJournalID"))
+            hk_raw = _pick_source_val(row, col_lookup, "headerkey")
+            jk_raw = _pick_source_val(row, col_lookup, "journalkey")
+            key = hk_raw if pd.notna(hk_raw) else (jk_raw or "1")
             if key not in seen_keys:
                 seen_keys.append(key)
                 unique_headers.append(row)
@@ -457,53 +973,58 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
         hdr_row = 6
         header_key_map = {}
         for h_row in unique_headers:
-            h_key = h_row.get("HeaderKey") if "HeaderKey" in h_row and pd.notna(h_row.get("HeaderKey")) else (h_row.get("JournalKey") or h_row.get("AccountingJournalID"))
-            if "HeaderKey" in h_row and pd.notna(h_row.get("HeaderKey")):
-                hk_val = int(h_row.get("HeaderKey"))
-            else:
-                hk_val = hdr_row - 5
+            hk_raw = _pick_source_val(h_row, col_lookup, "headerkey")
+            jk_raw = _pick_source_val(h_row, col_lookup, "journalkey")
+            h_key = hk_raw if pd.notna(hk_raw) else (jk_raw or "1")
+            hk_val = _safe_int_or_val(hk_raw, hdr_row - 5) if pd.notna(hk_raw) else (hdr_row - 5)
             header_key_map[h_key] = hk_val
 
             # Col B (2): Header Key*
             ws_hdr.cell(row=hdr_row, column=2, value=hk_val)
 
             # Col C (3): Add Only
-            ws_hdr.cell(row=hdr_row, column=3, value=to_yn(h_row.get("AddOnlyJournal")) or "Y")
+            ws_hdr.cell(row=hdr_row, column=3, value=to_yn(_pick_source_val(h_row, col_lookup, "addonly")) or "Y")
 
             # Col F (6): Accounting Journal ID
-            j_id = clean_val(h_row.get("AccountingJournalID")) or clean_val(h_row.get("JournalKey"))
+            j_id = clean_val(jk_raw)
             ws_hdr.cell(row=hdr_row, column=6, value=j_id)
 
             # Col E (5): Accounting Journal -> Strictly left blank
             ws_hdr.cell(row=hdr_row, column=5, value=None)
 
             # Col L (12): Company*
-            ws_hdr.cell(row=hdr_row, column=12, value=clean_val(h_row.get("CompanyReferenceID")) or "LE01")
+            ws_hdr.cell(row=hdr_row, column=12, value=clean_val(_pick_source_val(h_row, col_lookup, "company")) or "LE01")
 
             # Col M (13): Currency*
-            ws_hdr.cell(row=hdr_row, column=13, value=clean_val(h_row.get("Currency")) or "USD")
+            ws_hdr.cell(row=hdr_row, column=13, value=clean_val(_pick_source_val(h_row, col_lookup, "currency")) or "USD")
 
             # Col N (14): Ledger Type*
-            lt = clean_val(h_row.get("LedgerType")) or "Actuals"
+            lt = clean_val(_pick_source_val(h_row, col_lookup, "ledgertype")) or "Actuals"
             ws_hdr.cell(row=hdr_row, column=14, value="Actuals" if lt.upper() == "ACTUALS" else lt)
 
             # Col P (16): Accounting Date*
-            ws_hdr.cell(row=hdr_row, column=16, value=parse_date(h_row.get("AccountingDate")))
+            ws_hdr.cell(row=hdr_row, column=16, value=parse_date(_pick_source_val(h_row, col_lookup, "accountingdate")))
 
             # Col Q (17): Journal Source*
-            ws_hdr.cell(row=hdr_row, column=17, value=clean_val(h_row.get("JournalSource")) or "Manual_Journal")
+            ws_hdr.cell(row=hdr_row, column=17, value=clean_val(_pick_source_val(h_row, col_lookup, "journalsource")) or "Manual_Journal")
 
             # Col U (21): Record Quantity -> Strictly left blank
             ws_hdr.cell(row=hdr_row, column=21, value=None)
 
             # Col V (22): Journal Entry Memo
-            ws_hdr.cell(row=hdr_row, column=22, value=clean_val(h_row.get("JournalEntryMemo")))
+            ws_hdr.cell(row=hdr_row, column=22, value=clean_val(_pick_source_val(h_row, col_lookup, "journalentrymemo")))
 
             # Col W (23): External Reference ID
-            ws_hdr.cell(row=hdr_row, column=23, value=clean_val(h_row.get("JournalExternalReferenceID")))
+            ws_hdr.cell(row=hdr_row, column=23, value=clean_val(_pick_source_val(h_row, col_lookup, "journalextref")))
 
             # Col AG (33): Auto Complete
             ws_hdr.cell(row=hdr_row, column=33, value="Y")
+
+            # Auto-discovered header columns
+            for am in hdr_auto_mappings:
+                val = _coerce_auto_val(h_row.get(am["source_col"]), am["target_format"])
+                if val is not None:
+                    ws_hdr.cell(row=hdr_row, column=am["target_col_idx"], value=val)
 
             hdr_row += 1
 
@@ -511,46 +1032,35 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
         total_debits = 0.0
         total_credits = 0.0
         spend_matched_count = 0
-
-        # Resolve Sheet 2 column positions dynamically from Row 5 headers (supports updated v45.1 schema where
-        # Intercompany Affiliate is Col 29/AC and Balancing Worktag Affiliate shifted to Col 31/AE)
-        line_hdr_cols = {
-            str(ws_line.cell(row=5, column=c).value).strip(): c
-            for c in range(1, ws_line.max_column + 1)
-            if ws_line.cell(row=5, column=c).value is not None
-        }
-        col_intercompany = line_hdr_cols.get("Intercompany Affiliate")
-        col_balancing_affiliate = line_hdr_cols.get("Balancing Worktag Affiliate", 31)
+        interco_mapped_count = 0
 
         for idx, row in df.iterrows():
-            r_key = row.get("HeaderKey") if "HeaderKey" in row and pd.notna(row.get("HeaderKey")) else (row.get("JournalKey") or row.get("AccountingJournalID"))
-            if "HeaderKey" in row and pd.notna(row.get("HeaderKey")):
-                hk_val = int(row.get("HeaderKey"))
+            hk_raw = _pick_source_val(row, col_lookup, "headerkey")
+            jk_raw = _pick_source_val(row, col_lookup, "journalkey")
+            r_key = hk_raw if pd.notna(hk_raw) else (jk_raw or "1")
+            if pd.notna(hk_raw):
+                hk_val = _safe_int_or_val(hk_raw, header_key_map.get(r_key, 1))
             else:
                 hk_val = header_key_map.get(r_key, 1)
 
             ws_line.cell(row=line_row, column=2, value=hk_val)
 
-            if "ROW_ID" in row and pd.notna(row.get("ROW_ID")):
-                line_key_val = int(row.get("ROW_ID"))
-            else:
-                line_key_val = idx + 1
+            raw_rid = _pick_source_val(row, col_lookup, "row_id")
+            line_key_val = _safe_int_or_val(raw_rid, idx + 1) if pd.notna(raw_rid) else (idx + 1)
             ws_line.cell(row=line_row, column=3, value=line_key_val)
 
-            if "LineOrder" in row and pd.notna(row.get("LineOrder")):
-                line_order_val = int(row.get("LineOrder"))
-            else:
-                line_order_val = line_key_val
+            raw_lo = _pick_source_val(row, col_lookup, "lineorder")
+            line_order_val = _safe_int_or_val(raw_lo, line_key_val) if pd.notna(raw_lo) else line_key_val
             ws_line.cell(row=line_row, column=4, value=line_order_val)
 
-            ws_line.cell(row=line_row, column=5, value=clean_val(row.get("LineCompanyReferenceID")) or "LE01")
-            
-            acct_clean = clean_ledger_account(row.get("LedgerAccountReferenceID"))
-            ws_line.cell(row=line_row, column=6, value=acct_clean)
-            ws_line.cell(row=line_row, column=7, value=clean_val(row.get("LedgerAccountReferenceID_ParentID")) or "ACCOUNT_SET")
+            ws_line.cell(row=line_row, column=5, value=clean_val(_pick_source_val(row, col_lookup, "linecompany")) or "LE01")
 
-            deb_val = clean_amount(row.get("DebitAmount"))
-            crd_val = clean_amount(row.get("CreditAmount"))
+            acct_clean = clean_ledger_account(_pick_source_val(row, col_lookup, "ledgeraccount"))
+            ws_line.cell(row=line_row, column=6, value=acct_clean)
+            ws_line.cell(row=line_row, column=7, value=clean_val(_pick_source_val(row, col_lookup, "accountset")) or "ACCOUNT_SET")
+
+            deb_val = clean_amount(_pick_source_val(row, col_lookup, "debitamount"))
+            crd_val = clean_amount(_pick_source_val(row, col_lookup, "creditamount"))
 
             if deb_val is not None:
                 ws_line.cell(row=line_row, column=10, value=deb_val)
@@ -560,37 +1070,41 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
                 ws_line.cell(row=line_row, column=11, value=crd_val)
                 total_credits += crd_val
 
-            ws_line.cell(row=line_row, column=12, value=clean_val(row.get("LineCurrency")) or "USD")
+            ws_line.cell(row=line_row, column=12, value=clean_val(_pick_source_val(row, col_lookup, "linecurrency")) or "USD")
 
             # Col T (20): Memo - mapped directly from LineMemo. If empty or "NULL", left blank with no value (no fallback)
-            memo = clean_memo(row.get("LineMemo"))
+            memo = clean_memo(_pick_source_val(row, col_lookup, "linememo"))
             ws_line.cell(row=line_row, column=20, value=memo)
 
-            ws_line.cell(row=line_row, column=21, value=clean_val(row.get("JournalLineExternalReferenceID")))
-            ws_line.cell(row=line_row, column=22, value=parse_date(row.get("BudgetDate")))
-            ws_line.cell(row=line_row, column=23, value=clean_val(row.get("Worktag_Revenue_Category_ID")))
-            
+            ws_line.cell(row=line_row, column=21, value=clean_val(_pick_source_val(row, col_lookup, "lineextref")))
+            ws_line.cell(row=line_row, column=22, value=parse_date(_pick_source_val(row, col_lookup, "budgetdate")))
+            ws_line.cell(row=line_row, column=23, value=clean_val(_pick_source_val(row, col_lookup, "revenuecategory")))
+
             # Map Spend Category using Spend Category Mapped Ledger Account.xlsx
             acct_key = str(acct_clean).strip() if acct_clean is not None else ""
-            mapped_sc = spend_map.get(acct_key) or clean_val(row.get("Worktag_Spend_Category_ID"))
+            mapped_sc = spend_map.get(acct_key) or clean_val(_pick_source_val(row, col_lookup, "spendcategory"))
             ws_line.cell(row=line_row, column=25, value=mapped_sc)
             if mapped_sc:
                 spend_matched_count += 1
 
-            cc_3digit = clean_cost_center(row.get("Worktag_Cost_Center_Reference_ID"))
+            cc_3digit = clean_cost_center(_pick_source_val(row, col_lookup, "costcenter"))
             cell_cc = ws_line.cell(row=line_row, column=27, value=cc_3digit)
             if cc_3digit is not None:
                 cell_cc.number_format = "@"
 
             if col_intercompany:
-                interco_val = (
-                    clean_val(row.get("Worktag_Intercompany_Affiliate_ID"))
-                    or clean_val(row.get("IntercompanyAffiliate"))
-                    or clean_val(row.get("Intercompany_Affiliate_ID"))
-                )
+                interco_val = clean_val(_pick_source_val(row, col_lookup, "intercompanyaffiliate"))
                 ws_line.cell(row=line_row, column=col_intercompany, value=interco_val)
+                if interco_val is not None:
+                    interco_mapped_count += 1
 
-            ws_line.cell(row=line_row, column=col_balancing_affiliate, value=clean_val(row.get("Worktag_Business_Unit_ID")) or clean_val(row.get("OptionalBalancingWorktags_Business_Unit_ID")))
+            ws_line.cell(row=line_row, column=col_balancing_affiliate, value=clean_val(_pick_source_val(row, col_lookup, "balancingworktagaffiliate")))
+
+            # Auto-discovered line columns (any extra source or target columns)
+            for am in line_auto_mappings:
+                val = _coerce_auto_val(row.get(am["source_col"]), am["target_format"])
+                if val is not None:
+                    ws_line.cell(row=line_row, column=am["target_col_idx"], value=val)
 
             line_row += 1
 
@@ -602,6 +1116,9 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
         print(f"  - Sheet 1 ('{SHEET_HEADER}'): {total_journals} journal header rows written (Rows 6 to {hdr_row - 1})")
         print(f"  - Sheet 2 ('{SHEET_LINES}'): {total_lines_written} journal line rows written (Rows 6 to {line_row - 1})")
         print(f"  - Spend Categories Mapped: {spend_matched_count} / {total_lines_written} lines from '{SPEND_MAPPING_FILE}'")
+        if col_intercompany:
+            print(f"  - Intercompany Affiliate Mapped: {interco_mapped_count} / {total_lines_written} lines (Col {openpyxl.utils.get_column_letter(col_intercompany)})")
+        print(f"  - Auto-Discovered Extra Mappings: {len(all_auto_mappings)}")
         print(f"  - Total Debits:  ${total_debits:,.2f}")
         print(f"  - Total Credits: ${total_credits:,.2f}")
         print(f"  - Net Variance:  ${variance:,.2f} ({'BALANCED' if variance == 0 else 'UNBALANCED'})")
@@ -642,6 +1159,8 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
         "total_lines_written": total_lines_written,
         "total_source_rows": len(df),
         "spend_categories_mapped": spend_matched_count,
+        "intercompany_mapped_count": interco_mapped_count,
+        "auto_mapped_columns": all_auto_mappings,
         "total_debit": round(total_debits, 2),
         "total_credit": round(total_credits, 2),
         "variance": variance,
@@ -666,7 +1185,7 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
     spend_map = load_spend_category_map()
 
     custom_output = output_file is not None
-    datewise_target = get_datewise_output_path(source_file, target_dir=output_dir)
+    datewise_target = get_datewise_output_path(source_file, target_dir=output_dir, template_file=excel_template)
     if output_file is None:
         output_file = datewise_target
 
@@ -683,9 +1202,12 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         raise PermissionError(f"'{output_file}' is open in Excel.")
 
     df = load_source_dataframe(source_file)
+    source_cols = list(df.columns) if hasattr(df, "columns") and df.columns else (list(df.iloc[0].keys()) if len(df) > 0 else [])
+    col_lookup = _build_col_lookup(source_cols)
+
     print(f"Loading single-sheet Excel template: {excel_template}...")
     wb = openpyxl.load_workbook(excel_template)
-    
+
     sheet_name = "Submit Accounting Journal"
     if sheet_name not in wb.sheetnames:
         sheet_name = wb.sheetnames[0]
@@ -695,6 +1217,13 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         print(f"Clearing Sheet '{sheet_name}' data rows 6 to {ws.max_row}...")
         ws.delete_rows(6, ws.max_row - 5)
 
+    # Auto-discover any extra/new source or target columns beyond the core single-sheet positions
+    auto_mappings = _plan_single_sheet_mappings(source_cols, ws, col_lookup)
+    if auto_mappings:
+        print(f"Auto-Discovered {len(auto_mappings)} Additional Column Mapping(s):")
+        for am in auto_mappings:
+            print(f"  + [{am['target_sheet']}] '{am['source_col']}' -> Col {am['target_col_letter']} ({am['target_header']}) via {am['match_method']}")
+
     total_debits = 0.0
     total_credits = 0.0
     spend_matched_count = 0
@@ -702,19 +1231,21 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
     curr_row = 6
     for idx, row in df.iterrows():
         # Col B (2): Spreadsheet Key*
-        if "HeaderKey" in row and pd.notna(row.get("HeaderKey")):
-            key_val = int(row.get("HeaderKey"))
-        elif "JournalKey" in row and pd.notna(row.get("JournalKey")):
-            key_val = clean_val(row.get("JournalKey"))
+        hk_raw = _pick_source_val(row, col_lookup, "headerkey")
+        jk_raw = _pick_source_val(row, col_lookup, "journalkey")
+        if pd.notna(hk_raw):
+            key_val = _safe_int_or_val(hk_raw, 1)
+        elif pd.notna(jk_raw):
+            key_val = clean_val(jk_raw)
         else:
             key_val = 1
         ws.cell(row=curr_row, column=2, value=key_val)
 
         # Col C (3): Add Only
-        ws.cell(row=curr_row, column=3, value=to_yn(row.get("AddOnlyJournal")) or "Y")
+        ws.cell(row=curr_row, column=3, value=to_yn(_pick_source_val(row, col_lookup, "addonly")) or "Y")
 
         # Col D (4): Accounting Journal
-        j_id = clean_val(row.get("AccountingJournalID")) or clean_val(row.get("JournalKey"))
+        j_id = clean_val(jk_raw)
         ws.cell(row=curr_row, column=4, value=j_id)
 
         # Col E (5): Auto Complete
@@ -724,27 +1255,27 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         ws.cell(row=curr_row, column=8, value=j_id)
 
         # Col I (9): Submit
-        ws.cell(row=curr_row, column=9, value=to_yn(row.get("Submit")) or "Y")
+        ws.cell(row=curr_row, column=9, value=to_yn(_pick_source_val(row, col_lookup, "submit")) or "Y")
 
         # Col M (13): Journal Number
-        ws.cell(row=curr_row, column=13, value=clean_val(row.get("JournalNumber")))
+        ws.cell(row=curr_row, column=13, value=clean_val(_pick_source_val(row, col_lookup, "journalnumber")))
 
         # Col O (15): Company*
-        ws.cell(row=curr_row, column=15, value=clean_val(row.get("CompanyReferenceID")) or "LE01")
+        ws.cell(row=curr_row, column=15, value=clean_val(_pick_source_val(row, col_lookup, "company")) or "LE01")
 
         # Col P (16): Currency*
-        ws.cell(row=curr_row, column=16, value=clean_val(row.get("Currency")) or "USD")
+        ws.cell(row=curr_row, column=16, value=clean_val(_pick_source_val(row, col_lookup, "currency")) or "USD")
 
         # Col Q (17): Ledger Type*
-        lt = clean_val(row.get("LedgerType")) or "Actuals"
+        lt = clean_val(_pick_source_val(row, col_lookup, "ledgertype")) or "Actuals"
         ledger_type = "Actuals" if lt.upper() == "ACTUALS" else lt
         ws.cell(row=curr_row, column=17, value=ledger_type)
 
         # Col R (18): Book Code
-        ws.cell(row=curr_row, column=18, value=clean_val(row.get("BookCode")))
+        ws.cell(row=curr_row, column=18, value=clean_val(_pick_source_val(row, col_lookup, "bookcode")))
 
         # Col S (19): Accounting Date*
-        acct_date = clean_val(row.get("AccountingDate"))
+        acct_date = clean_val(_pick_source_val(row, col_lookup, "accountingdate"))
         if acct_date:
             if isinstance(acct_date, (pd.Timestamp, datetime.datetime, datetime.date)):
                 acct_date_str = acct_date.strftime("%Y-%m-%d")
@@ -754,34 +1285,36 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
             cell_ad.number_format = "@"
 
         # Col T (20): Journal Source*
-        ws.cell(row=curr_row, column=20, value=clean_val(row.get("JournalSource")) or "Manual_Journal")
+        ws.cell(row=curr_row, column=20, value=clean_val(_pick_source_val(row, col_lookup, "journalsource")) or "Manual_Journal")
 
         # Col X (24): Record Quantity
         ws.cell(row=curr_row, column=24, value=clean_val(row.get("Record_Quantity")) or "N")
 
         # Col Y (25): Journal Entry Memo
-        ws.cell(row=curr_row, column=25, value=clean_val(row.get("JournalEntryMemo")))
+        ws.cell(row=curr_row, column=25, value=clean_val(_pick_source_val(row, col_lookup, "journalentrymemo")))
 
         # Col Z (26): External Reference ID
-        ws.cell(row=curr_row, column=26, value=clean_val(row.get("JournalExternalReferenceID")))
+        ws.cell(row=curr_row, column=26, value=clean_val(_pick_source_val(row, col_lookup, "journalextref")))
 
         # Col AI (35): Row ID* (set to 1 for single-sheet Workday format)
         ws.cell(row=curr_row, column=35, value=1)
 
         # Col AJ (36): Line Order
-        if "LineOrder" in row and pd.notna(row.get("LineOrder")):
-            l_order = int(row.get("LineOrder"))
-        elif "ROW_ID" in row and pd.notna(row.get("ROW_ID")):
-            l_order = int(row.get("ROW_ID"))
+        raw_lo = _pick_source_val(row, col_lookup, "lineorder")
+        raw_rid = _pick_source_val(row, col_lookup, "row_id")
+        if pd.notna(raw_lo):
+            l_order = _safe_int_or_val(raw_lo, idx + 1)
+        elif pd.notna(raw_rid):
+            l_order = _safe_int_or_val(raw_rid, idx + 1)
         else:
             l_order = idx + 1
         ws.cell(row=curr_row, column=36, value=l_order)
 
         # Col AK (37): Line Company
-        ws.cell(row=curr_row, column=37, value=clean_val(row.get("LineCompanyReferenceID")) or clean_val(row.get("CompanyReferenceID")) or "LE01")
+        ws.cell(row=curr_row, column=37, value=clean_val(_pick_source_val(row, col_lookup, "linecompany")) or clean_val(_pick_source_val(row, col_lookup, "company")) or "LE01")
 
         # Col AL (38): Ledger Account*
-        acct_clean = clean_ledger_account(row.get("LedgerAccountReferenceID"))
+        acct_clean = clean_ledger_account(_pick_source_val(row, col_lookup, "ledgeraccount"))
         cell_acct = ws.cell(row=curr_row, column=38, value=acct_clean)
         if isinstance(acct_clean, int):
             cell_acct.number_format = "#,##0"
@@ -789,70 +1322,77 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
             cell_acct.number_format = "@"
 
         # Col AM (39): Account Set
-        ws.cell(row=curr_row, column=39, value=clean_val(row.get("LedgerAccountReferenceID_ParentID")) or "ACCOUNT_SET")
+        ws.cell(row=curr_row, column=39, value=clean_val(_pick_source_val(row, col_lookup, "accountset")) or "ACCOUNT_SET")
 
         # Col AP (42): Debit Amount
-        deb_val = clean_amount(row.get("DebitAmount"))
+        deb_val = clean_amount(_pick_source_val(row, col_lookup, "debitamount"))
         cell_deb = ws.cell(row=curr_row, column=42, value=deb_val)
         if deb_val is not None:
             cell_deb.number_format = "#,##0.00"
             total_debits += deb_val
 
         # Col AQ (43): Credit Amount
-        crd_val = clean_amount(row.get("CreditAmount"))
+        crd_val = clean_amount(_pick_source_val(row, col_lookup, "creditamount"))
         cell_crd = ws.cell(row=curr_row, column=43, value=crd_val)
         if crd_val is not None:
             cell_crd.number_format = "#,##0.00"
             total_credits += crd_val
 
         # Col AR (44): Currency
-        ws.cell(row=curr_row, column=44, value=clean_val(row.get("LineCurrency")) or "USD")
+        ws.cell(row=curr_row, column=44, value=clean_val(_pick_source_val(row, col_lookup, "linecurrency")) or "USD")
 
         # Col AZ (52): Memo - mapped directly from LineMemo. If empty or "NULL", strictly left blank with no value (zero fallback to JournalEntryMemo)
-        memo = clean_memo(row.get("LineMemo"))
+        memo = clean_memo(_pick_source_val(row, col_lookup, "linememo"))
         ws.cell(row=curr_row, column=52, value=memo)
 
         # Col BA (53): External Reference ID
-        ws.cell(row=curr_row, column=53, value=clean_val(row.get("JournalLineExternalReferenceID")))
+        ws.cell(row=curr_row, column=53, value=clean_val(_pick_source_val(row, col_lookup, "lineextref")))
 
         # Col BB (54): Budget Date
-        ws.cell(row=curr_row, column=54, value=clean_val(row.get("BudgetDate")))
+        ws.cell(row=curr_row, column=54, value=parse_date(_pick_source_val(row, col_lookup, "budgetdate")))
 
         # Worktag Columns:
         # Col BC (55): Cost Center formatted as 3-digit number (e.g. '000', '090', '200')
-        cc_3digit = clean_cost_center(row.get("Worktag_Cost_Center_Reference_ID"))
+        cc_3digit = clean_cost_center(_pick_source_val(row, col_lookup, "costcenter"))
         cell_cc = ws.cell(row=curr_row, column=55, value=cc_3digit)
         if cc_3digit is not None:
             cell_cc.number_format = "@"
 
         # Col BE (57): Spend Category mapped from Spend Category Mapped Ledger Account.xlsx
         acct_key = str(acct_clean).strip() if acct_clean is not None else ""
-        mapped_sc = spend_map.get(acct_key) or clean_val(row.get("Worktag_Spend_Category_ID"))
+        mapped_sc = spend_map.get(acct_key) or clean_val(_pick_source_val(row, col_lookup, "spendcategory"))
         ws.cell(row=curr_row, column=57, value=mapped_sc)
         if mapped_sc:
             spend_matched_count += 1
 
         # Col BG (59): Business Unit
-        ws.cell(row=curr_row, column=59, value=clean_val(row.get("Worktag_Business_Unit_ID")) or clean_val(row.get("OptionalBalancingWorktags_Business_Unit_ID")))
+        ws.cell(row=curr_row, column=59, value=clean_val(_pick_source_val(row, col_lookup, "balancingworktagaffiliate")))
 
         # Col BI (61): Custom Organization
-        ws.cell(row=curr_row, column=61, value=clean_val(row.get("Worktag_Custom_Organization_Reference_ID")))
+        ws.cell(row=curr_row, column=61, value=clean_val(_pick_source_val(row, col_lookup, "customorganization")))
 
         # Col BK (63): Custom Worktag 1
-        ws.cell(row=curr_row, column=63, value=clean_val(row.get("Worktag_Custom_Worktag_1_ID")))
+        ws.cell(row=curr_row, column=63, value=clean_val(_pick_source_val(row, col_lookup, "customworktag1")))
 
         # Col BM (65): Revenue Category
-        ws.cell(row=curr_row, column=65, value=clean_val(row.get("Worktag_Revenue_Category_ID")))
+        ws.cell(row=curr_row, column=65, value=clean_val(_pick_source_val(row, col_lookup, "revenuecategory")))
+
+        # Auto-discovered extra source/target columns
+        for am in auto_mappings:
+            val = _coerce_auto_val(row.get(am["source_col"]), am["target_format"])
+            if val is not None:
+                ws.cell(row=curr_row, column=am["target_col_idx"], value=val)
 
         curr_row += 1
 
     variance = round(total_debits - total_credits, 2)
     total_lines = len(df)
-    version_id = "v48.0" if "v48" in excel_template.lower() else ("v47.0" if "v47" in excel_template.lower() else "v46.0")
+    version_id = _detect_template_version_tag(excel_template)
 
     print(f"\n[SINGLE-SHEET MAPPING SUMMARY ({version_id})] Successfully mapped '{source_file}':")
     print(f"  - Sheet ('{sheet_name}'): {total_lines} rows written (Rows 6 to {curr_row - 1})")
     print(f"  - Spend Categories Mapped: {spend_matched_count} / {total_lines} lines from '{SPEND_MAPPING_FILE}'")
+    print(f"  - Auto-Discovered Extra Mappings: {len(auto_mappings)}")
     print(f"  - Total Debits:  ${total_debits:,.2f}")
     print(f"  - Total Credits: ${total_credits:,.2f}")
     print(f"  - Net Variance:  ${variance:,.2f} ({'BALANCED' if variance == 0 else 'UNBALANCED'})")
@@ -882,6 +1422,7 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         "total_lines_written": total_lines,
         "total_source_rows": total_lines,
         "spend_categories_mapped": spend_matched_count,
+        "auto_mapped_columns": auto_mappings,
         "total_debit": round(total_debits, 2),
         "total_credit": round(total_credits, 2),
         "variance": variance,
@@ -890,7 +1431,7 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
     }
 
 # ==============================================================================
-# MAIN DISPATCHER
+# MAIN DISPATCHER & BULK PROCESSOR (MAX 12 FILES)
 # ==============================================================================
 def resolve_template_path(template_name):
     """Resolves template ID (v45, v46, v47, v48) or filename to full path."""
@@ -913,7 +1454,7 @@ def process_journal(source_file=None, excel_template=None, output_file=None, out
         src_2026 = find_source_file("Accounting_Journal_Raw_LE01_202601.xlsx")
         if not os.path.exists(src_2026):
             src_2026 = find_source_file("Accounting_Journal_Raw_02_202601.xlsx")
-        
+
         src_2025 = find_source_file("Accounting_Journal_Raw_LE01_202501.xlsx")
         if not os.path.exists(src_2025):
             src_2025 = find_source_file("Accounting_Journal_RawAgg_01_202501.xlsx")
@@ -944,15 +1485,95 @@ def process_journal(source_file=None, excel_template=None, output_file=None, out
     else:
         return process_journal_single_sheet(resolved_source, excel_template, output_file, output_dir=output_dir)
 
+def process_bulk(source_files, excel_template=None, output_dir=None, output_prefix=None):
+    """Processes up to 12 source files sequentially into the selected Workday EIB template."""
+    if not source_files:
+        raise ValueError("No source files provided for bulk processing.")
+    if len(source_files) > MAX_BULK_FILES:
+        raise ValueError(f"Bulk processing supports a maximum of {MAX_BULK_FILES} files per batch (received {len(source_files)}).")
+
+    tpl_path = resolve_template_path(excel_template) if excel_template else resolve_template_path("v45")
+    tpl_ver = _detect_template_version_tag(tpl_path)
+    out_dir = output_dir if (output_dir and os.path.isdir(output_dir)) else os.path.join("output", datetime.date.today().strftime("%Y-%m-%d"))
+    os.makedirs(out_dir, exist_ok=True)
+
+    results = []
+    used_names = set()
+    total_lines = 0
+    total_debits = 0.0
+    total_credits = 0.0
+    succeeded = 0
+    failed = 0
+
+    for idx, src in enumerate(source_files, 1):
+        bname = os.path.basename(str(src))
+        stem = os.path.splitext(bname)[0] or f"File_{idx}"
+        if output_prefix and str(output_prefix).strip():
+            clean_pfx = os.path.splitext(os.path.basename(str(output_prefix).strip()))[0]
+            candidate_name = f"{clean_pfx}_{stem}.xlsx"
+        else:
+            candidate_name = f"{stem}_{tpl_ver}.xlsx"
+
+        # Prevent collisions if duplicate basenames exist in the batch
+        if candidate_name.lower() in used_names:
+            candidate_name = f"{os.path.splitext(candidate_name)[0]}_{idx}.xlsx"
+        used_names.add(candidate_name.lower())
+        out_path = os.path.join(out_dir, candidate_name)
+
+        try:
+            res = process_journal(source_file=src, excel_template=tpl_path, output_file=out_path, output_dir=out_dir)
+            results.append(res)
+            total_lines += res.get("total_lines_written", 0)
+            total_debits += float(res.get("total_debit", 0.0))
+            total_credits += float(res.get("total_credit", 0.0))
+            succeeded += 1
+        except Exception as e:
+            failed += 1
+            results.append({
+                "success": False,
+                "source_file": src,
+                "error": str(e),
+                "output_file": out_path
+            })
+
+    return {
+        "success": failed == 0,
+        "max_bulk_files": MAX_BULK_FILES,
+        "total_files": len(source_files),
+        "succeeded": succeeded,
+        "failed": failed,
+        "template_version": tpl_ver,
+        "output_dir": out_dir,
+        "total_lines_written": total_lines,
+        "total_debit": round(total_debits, 2),
+        "total_credit": round(total_credits, 2),
+        "variance": round(total_debits - total_credits, 2),
+        "results": results
+    }
+
 def main():
     parser = argparse.ArgumentParser(description="Workday Accounting Journal EIB Ingest Agent")
     parser.add_argument("--source", "-s", help="Source file (Excel or CSV), or 'all' to process both", default=None)
     parser.add_argument("--target", "-t", help="Target Excel base template", default=None)
     parser.add_argument("--all", "-a", action="store_true", help="Process both 2025 and 2026 files")
+    parser.add_argument("--bulk", "-b", nargs="+", help=f"Bulk process up to {MAX_BULK_FILES} source files", default=None)
+    parser.add_argument("--output-dir", "-o", help="Destination folder for output files", default=None)
+    parser.add_argument("--analyze", action="store_true", help="Analyze source and target schemas without generating files")
     args = parser.parse_args()
 
+    if args.analyze and args.source:
+        import json
+        report = analyze_schema(args.source, args.target)
+        print(json.dumps(report, indent=2, default=str))
+        return
+
+    if args.bulk:
+        summary = process_bulk(args.bulk, excel_template=args.target, output_dir=args.output_dir)
+        print(f"\n[BULK SUMMARY] {summary['succeeded']}/{summary['total_files']} files processed -> {summary['output_dir']}")
+        return
+
     if args.all:
-        process_journal(source_file="all", excel_template=args.target)
+        process_journal(source_file="all", excel_template=args.target, output_dir=args.output_dir)
         return
 
     # Discover available files in source and target directories as well as root
@@ -984,7 +1605,7 @@ def main():
         )
 
     if "both" in chosen_source.lower() or "all" in chosen_source.lower():
-        process_journal(source_file="all", excel_template=args.target)
+        process_journal(source_file="all", excel_template=args.target, output_dir=args.output_dir)
         return
 
     # 2. Ask user where to map the data (show base template name)
@@ -998,7 +1619,7 @@ def main():
         )
 
     # 3. Execute mapping individually via dispatcher
-    process_journal(source_file=chosen_source, excel_template=chosen_target)
+    process_journal(source_file=chosen_source, excel_template=chosen_target, output_dir=args.output_dir)
 
 if __name__ == "__main__":
     main()

@@ -101,8 +101,9 @@ Key Features:
 | **Revenue Category** | `W` | 23 | `Worktag_Revenue_Category_ID` |
 | **Spend Category** | **`Y`** | **25** | **Looked up from `Spend Category Mapped Ledger Account.xlsx` based on `Ledger Account` (Col 6)** |
 | **Cost Center** | **`AA`** | **27** | **Formatted as 3-digit number** (e.g. `'000'`, `'090'`, `'070'`, `'200'`) |
-| **Intercompany Affiliate** | **`AC`** | **29** | `Worktag_Intercompany_Affiliate_ID` / `IntercompanyAffiliate` (blank if absent) |
-| **Balancing Worktag Affiliate** | **`AE`** | **31** | `Worktag_Business_Unit_ID` |
+| **Intercompany Affiliate** | **`AC`** | **29** | Auto-detected from `Worktag_Intercompany_Affiliate_ID`, `Intercompany Affiliate`, `Intercompany_Affiliate_ID`, `Affiliate`, or `TradingPartner` (blank if absent) |
+| **Balancing Worktag Affiliate** | **`AE`** | **31** | `Worktag_Business_Unit_ID` (dynamic Row 5 lookup) |
+| **Additional / New Columns** | *Dynamic* | *Auto* | **Auto-Schema Discovery** matches any additional/new source & target columns (`Book Code`, `Document Link`, `Exclude from Spend Report`, `Supplier`, `Customer`, `Project`, etc.) |
 
 ---
 

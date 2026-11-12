@@ -59,5 +59,6 @@ Rows 1–5 are metadata and header rows. Data rows start at Row 6.
 - **Revenue Category** (`Col W` / Col 23): `Worktag_Revenue_Category_ID`.
 - **Spend Category** (`Col Y` / Col 25): `Worktag_Spend_Category_ID`.
 - **Cost Center** (`Col AA` / Col 27): **Formatted as a 3-digit number** (e.g., `'000'`, `'090'`, `'070'`, `'200'`) with text format `@` to preserve leading zeros.
-- **Intercompany Affiliate** (`Col AC` / Col 29): `Worktag_Intercompany_Affiliate_ID` / `IntercompanyAffiliate` (blank if absent in source).
-- **Balancing Worktag Affiliate** (`Col AE` / Col 31): `Worktag_Business_Unit_ID`.
+- **Intercompany Affiliate** (`Col AC` / Col 29): Auto-detected across Workday & ERP column variants (`Worktag_Intercompany_Affiliate_ID`, `IntercompanyAffiliate`, `Intercompany Affiliate`, `Intercompany_Affiliate_ID`, `Affiliate`, `TradingPartner`, etc.; blank if absent in source).
+- **Balancing Worktag Affiliate** (`Col AE` / Col 31): `Worktag_Business_Unit_ID` / `OptionalBalancingWorktags_Business_Unit_ID`.
+- **Dynamic Auto-Discovery & Bulk Processing (Max 12 Files)**: Automatically inspects both source headers and target template columns (Row 5 + Row 4) to map newly introduced columns (e.g. `Supplier`, `Customer`, `Book Code`, `Document Link`, `Exclude from Spend Report`, `Project`, etc.), and supports bulk processing of up to **12 files** per batch.

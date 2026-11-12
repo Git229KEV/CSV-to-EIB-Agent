@@ -107,17 +107,20 @@
     <!-- LEFT COLUMN: Operations & Setup (7 cols) -->
     <div class="lg:col-span-7 space-y-4">
 
-      <!-- PANEL 1: SOURCE FILE INPUT -->
+      <!-- PANEL 1: SOURCE FILE INPUT (SINGLE OR BULK UP TO 12 FILES) -->
       <section class="bg-app-surface border border-app-border rounded-xl p-4 space-y-3 shadow-sm">
         <div class="flex items-center justify-between border-b border-app-border/60 pb-2">
           <div class="flex items-center space-x-2">
             <span class="w-5 h-5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-mono font-bold text-[10px]">1</span>
             <h2 class="font-bold text-xs text-white uppercase tracking-wider">Source Accounting File</h2>
           </div>
-          <span class="text-[10px] font-mono text-zinc-400">.XLSX &amp; .CSV Format</span>
+          <div class="flex items-center space-x-2">
+            <span id="bulkCountBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-app-border">0 / 12 Queued</span>
+            <span class="text-[10px] font-mono text-zinc-400">.XLSX &amp; .CSV</span>
+          </div>
         </div>
 
-        <!-- Path input with Browse button -->
+        <!-- Path input with Browse button (supports single or multi-select up to 12 files) -->
         <div class="flex items-center space-x-2">
           <div class="relative flex-1">
             <i data-lucide="file-text" class="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-2.5"></i>
@@ -125,34 +128,54 @@
               type="text" 
               id="sourcePathInput"
               readonly
-              placeholder="Select or browse source accounting file..."
+              placeholder="Select or browse source accounting file(s) — single or bulk (max 12)..."
               class="w-full bg-[#0b0d13] border border-app-border rounded-lg pl-9 pr-3 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 transition"
             />
           </div>
           
           <button 
-            onclick="browseSourceFile()" 
+            id="btnBrowseSource"
+            onclick="browseSourceFile(false)" 
             class="px-3.5 py-2 rounded-lg font-mono font-bold text-xs bg-app-elevated hover:bg-zinc-700 text-white border border-app-border flex items-center space-x-1.5 transition hover:scale-[1.02]"
-            title="Browse local drive for source file using Windows OpenFileDialog"
+            title="Browse local drive for 1 to 12 source files (.xlsx or .csv)"
           >
             <i data-lucide="folder-search" class="w-3.5 h-3.5 text-emerald-400"></i>
             <span>Browse File...</span>
           </button>
+
+          <button 
+            id="btnAddMoreFiles"
+            onclick="browseSourceFile(true)" 
+            class="hidden px-2.5 py-2 rounded-lg font-mono font-bold text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1 transition"
+            title="Add more files to the bulk queue (max 12)"
+          >
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Add</span>
+          </button>
           
-          <!-- Hidden fallback input -->
-          <input type="file" id="fallbackFileInput" class="hidden" accept=".xlsx, .csv" />
+          <!-- Hidden fallback input (supports multiple selection up to 12 files) -->
+          <input type="file" id="fallbackFileInput" class="hidden" accept=".xlsx,.xls,.csv" multiple />
         </div>
 
-        <!-- Source details pill -->
-        <div id="sourceDetailsCard" class="p-2.5 rounded-lg bg-[#0b0d13] border border-app-border/70 flex items-center justify-between text-[11px] font-mono">
+        <!-- Bulk Queue List (shown when 2+ files queued, max 12) -->
+        <div id="bulkQueuePanel" class="hidden p-2.5 rounded-lg bg-[#0b0d13] border border-emerald-500/30 space-y-2">
+          <div class="flex items-center justify-between text-[10px] font-mono">
+            <span class="text-emerald-400 font-bold uppercase tracking-wider">Bulk Processing Queue (Max 12 Files)</span>
+            <button onclick="clearFileQueue()" class="text-zinc-400 hover:text-red-400 transition">Clear All</button>
+          </div>
+          <div id="bulkQueueList" class="max-h-28 overflow-y-auto space-y-1 pr-1"></div>
+        </div>
+
+        <!-- Source details & auto-schema discovery pill -->
+        <div id="sourceDetailsCard" class="p-2.5 rounded-lg bg-[#0b0d13] border border-app-border/70 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
           <div class="flex items-center space-x-2">
             <span class="text-zinc-400">Active Source:</span>
-            <span id="sourceFileNameLabel" class="text-zinc-400 italic">Auto-detects upon file upload (.xlsx / .csv)</span>
+            <span id="sourceFileNameLabel" class="text-zinc-400 italic">Auto-detects schema &amp; columns upon upload (.xlsx / .csv)</span>
           </div>
           <div class="flex items-center space-x-2">
-            <span class="text-emerald-400 font-semibold flex items-center gap-1">
-              <i data-lucide="check" class="w-3 h-3"></i>
-              LineMemo Strict Blank Active
+            <span id="schemaDiscoveryBadge" class="text-emerald-400 font-semibold flex items-center gap-1">
+              <i data-lucide="sparkles" class="w-3 h-3"></i>
+              Auto-Schema Mapper Ready
             </span>
           </div>
         </div>
@@ -194,14 +217,14 @@
           </button>
         </div>
 
-        <!-- Custom Output File Name Input (User Defined) -->
+        <!-- Custom Output File Name Input (User Defined / Optional Bulk Prefix) -->
         <div class="p-3 rounded-lg bg-[#0b0d13] border border-app-border/80 space-y-2">
           <div class="flex items-center justify-between text-[11px] font-mono">
-            <label for="outputFileNameInput" class="text-zinc-300 font-bold flex items-center gap-1.5">
+            <label for="outputFileNameInput" id="outputFileNameLabel" class="text-zinc-300 font-bold flex items-center gap-1.5">
               <i data-lucide="file-edit" class="w-3.5 h-3.5 text-emerald-400"></i>
               Output File Name (Enter Your Custom Name):
             </label>
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">.xlsx Auto-Appended</span>
+            <span id="outputNameModeBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">.xlsx Auto-Appended</span>
           </div>
 
           <div class="relative">
@@ -440,6 +463,9 @@
 
   <script>
     // Desktop App State
+    const MAX_BULK_FILES = 12;
+    let queuedFiles = []; // Array of { filepath, filename, size, total_rows, total_journals, format, auto_discovered_mappings, intercompany_source_col, unmapped_populated_columns }
+    let appendBrowseMode = false;
     let currentSourcePath = "";
     let currentSourceFilename = "";
     let currentSaveLocation = "";
@@ -482,41 +508,47 @@
     }
 
     document.addEventListener("DOMContentLoaded", async () => {
-      // Initialize default paths via Native IPC (keep source input empty so placeholder is visible)
       await loadDefaultPaths();
 
-      // Setup fallback file input (stages actual file bytes to disk via Native IPC and auto-detects structure)
+      // Setup fallback multi-file input (stages actual file bytes via Native IPC, enforces 12 max)
       const fallbackInput = document.getElementById("fallbackFileInput");
       fallbackInput.addEventListener("change", async (e) => {
-        if (e.target.files.length > 0) {
-          const file = e.target.files[0];
-          const reader = new FileReader();
-          reader.onload = async () => {
+        const picked = Array.from(e.target.files || []);
+        if (picked.length === 0) return;
+
+        const api = await getApi();
+        const stagedList = [];
+        for (const file of picked.slice(0, MAX_BULK_FILES)) {
+          const dataUrl = await new Promise((res) => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result);
+            reader.readAsDataURL(file);
+          });
+          if (api && api.stage_uploaded_file) {
             try {
-              const api = await getApi();
-              if (api && api.stage_uploaded_file) {
-                const staged = await api.stage_uploaded_file(file.name, reader.result);
-                if (staged && staged.success && staged.filepath) {
-                  await setSourceFile(staged.filepath, file.name, staged);
-                  logToConsole(`[Source] Uploaded local file: ${file.name} (${formatBytes(file.size)})`);
-                  return;
-                }
+              const staged = await api.stage_uploaded_file(file.name, dataUrl, selectedTemplateId);
+              if (staged && staged.success && staged.filepath) {
+                stagedList.push(staged);
+                continue;
               }
             } catch (err) {
               console.warn("stage_uploaded_file error:", err);
             }
-            await setSourceFile(file.name, file.name);
-            logToConsole(`[Source] Uploaded local file: ${file.name} (${formatBytes(file.size)})`);
-          };
-          reader.readAsDataURL(file);
+          }
+          stagedList.push({ filepath: file.name, filename: file.name, size: file.size });
         }
+
+        if (picked.length > MAX_BULK_FILES) {
+          logToConsole(`[Limit] Selected ${picked.length} files; bulk limit is ${MAX_BULK_FILES} files max. Loaded first ${MAX_BULK_FILES}.`);
+        }
+        await applySelectedFiles(stagedList, appendBrowseMode);
+        e.target.value = "";
       });
 
       lucide.createIcons();
     });
 
     async function loadDefaultPaths() {
-      // Ensure sourcePathInput remains empty on startup so the placeholder is displayed
       document.getElementById("sourcePathInput").value = "";
       try {
         const api = await getApi();
@@ -525,7 +557,7 @@
           currentSaveLocation = data.default_output_dir || "output";
           document.getElementById("saveLocationInput").value = currentSaveLocation;
           logToConsole(`[Init] Default save location set: ${currentSaveLocation}`);
-          logToConsole(`[Ready] Browse and upload a source accounting file (.xlsx or .csv) to auto-detect schema & records.`);
+          logToConsole(`[Ready] Browse 1 file or up to ${MAX_BULK_FILES} files (Bulk Mode) to auto-analyze source & target schemas.`);
           return;
         }
       } catch (err) {
@@ -535,48 +567,178 @@
       document.getElementById("saveLocationInput").value = "output";
     }
 
-    async function setSourceFile(fullPath, filename, meta = null) {
-      currentSourcePath = fullPath;
-      currentSourceFilename = filename || fullPath.split('\\').pop().split('/').pop();
+    function logSchemaDiscovery(meta, prefixLabel = "") {
+      if (!meta) return;
+      const prefix = prefixLabel ? `[Schema:${prefixLabel}]` : "[Schema]";
+      if (meta.intercompany_source_col) {
+        logToConsole(`${prefix} Intercompany Affiliate matched source column '${meta.intercompany_source_col}' -> Col AC.`);
+      }
+      const autos = meta.auto_discovered_mappings || [];
+      if (autos.length > 0) {
+        logToConsole(`${prefix} Auto-discovered ${autos.length} additional source <-> target column mapping(s):`);
+        autos.forEach(m => {
+          logToConsole(`  + [${m.target_sheet}] '${m.source_col}' -> Col ${m.target_col_letter} (${m.target_header}) [${m.match_method}]`);
+        });
+      }
+      const unmapped = meta.unmapped_populated_columns || [];
+      if (unmapped.length > 0) {
+        logToConsole(`${prefix} Note: ${unmapped.length} populated source column(s) have no matching slot in ${selectedTemplateVersion}: ${unmapped.join(", ")}`);
+      }
+    }
 
-      document.getElementById("sourcePathInput").value = currentSourcePath;
+    function renderFileQueueUI() {
+      const count = queuedFiles.length;
+      const badge = document.getElementById("bulkCountBadge");
+      const btnAdd = document.getElementById("btnAddMoreFiles");
+      const queuePanel = document.getElementById("bulkQueuePanel");
+      const queueList = document.getElementById("bulkQueueList");
+      const pathInput = document.getElementById("sourcePathInput");
       const labelEl = document.getElementById("sourceFileNameLabel");
-      labelEl.className = "text-white font-bold";
+      const schemaBadge = document.getElementById("schemaDiscoveryBadge");
+      const btnProcessText = document.getElementById("btnProcessText");
+      const outLabel = document.getElementById("outputFileNameLabel");
+      const outBadge = document.getElementById("outputNameModeBadge");
+      const outInput = document.getElementById("outputFileNameInput");
 
+      if (badge) {
+        badge.innerText = `${count} / ${MAX_BULK_FILES} Queued`;
+        badge.className = count > 1
+          ? "text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold"
+          : "text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-app-border";
+      }
+
+      if (btnAdd) {
+        if (count >= 1 && count < MAX_BULK_FILES) btnAdd.classList.remove("hidden");
+        else btnAdd.classList.add("hidden");
+      }
+
+      if (count === 0) {
+        currentSourcePath = "";
+        currentSourceFilename = "";
+        pathInput.value = "";
+        queuePanel.classList.add("hidden");
+        labelEl.className = "text-zinc-400 italic";
+        labelEl.innerText = "Auto-detects schema & columns upon upload (.xlsx / .csv)";
+        schemaBadge.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>Auto-Schema Mapper Ready</span>`;
+        btnProcessText.innerText = "Ingest & Generate EIB Spreadsheet";
+        outLabel.innerHTML = `<i data-lucide="file-edit" class="w-3.5 h-3.5 text-emerald-400"></i> Output File Name (Enter Your Custom Name):`;
+        outBadge.innerText = ".xlsx Auto-Appended";
+        outInput.placeholder = "Type your output file name here (e.g. Workday_Journal_2025.xlsx)...";
+      } else if (count === 1) {
+        const f = queuedFiles[0];
+        currentSourcePath = f.filepath;
+        currentSourceFilename = f.filename;
+        pathInput.value = f.filepath;
+        queuePanel.classList.add("hidden");
+        labelEl.className = "text-white font-bold";
+        const rowsStr = f.total_rows !== undefined && f.total_rows !== null ? ` — ${f.total_rows} lines, ${f.total_journals || 1} journals` : "";
+        labelEl.innerText = `${f.filename}${rowsStr}`;
+        const autoCount = (f.auto_discovered_mappings || []).length + (f.intercompany_source_col ? 1 : 0);
+        schemaBadge.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>${autoCount} Auto-Mapped Extra Cols</span>`;
+        btnProcessText.innerText = "Ingest & Generate EIB Spreadsheet";
+        outLabel.innerHTML = `<i data-lucide="file-edit" class="w-3.5 h-3.5 text-emerald-400"></i> Output File Name (Enter Your Custom Name):`;
+        outBadge.innerText = ".xlsx Auto-Appended";
+        outInput.placeholder = "Type your output file name here (e.g. Workday_Journal_2025.xlsx)...";
+      } else {
+        const totalRows = queuedFiles.reduce((acc, f) => acc + (f.total_rows || 0), 0);
+        const totalAuto = queuedFiles.reduce((acc, f) => acc + ((f.auto_discovered_mappings || []).length + (f.intercompany_source_col ? 1 : 0)), 0);
+        currentSourcePath = queuedFiles[0].filepath;
+        currentSourceFilename = `${count} files queued`;
+        pathInput.value = `Bulk Queue: ${count} files selected (${totalRows} total rows)`;
+        queuePanel.classList.remove("hidden");
+        queueList.innerHTML = queuedFiles.map((f, idx) => `
+          <div class="flex items-center justify-between px-2 py-1 rounded bg-app-surface border border-app-border/70 text-[11px] font-mono">
+            <div class="flex items-center space-x-2 truncate">
+              <span class="text-emerald-400 font-bold">${idx + 1}.</span>
+              <span class="text-zinc-200 truncate" title="${f.filepath}">${f.filename}</span>
+              <span class="text-zinc-500">(${f.total_rows ?? '?'} lines)</span>
+            </div>
+            <button onclick="removeQueuedFile(${idx})" class="text-zinc-500 hover:text-red-400 px-1 font-bold" title="Remove file">&times;</button>
+          </div>
+        `).join("");
+        labelEl.className = "text-emerald-400 font-bold";
+        labelEl.innerText = `Bulk Batch: ${count} / ${MAX_BULK_FILES} files (${totalRows} total line records)`;
+        schemaBadge.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>${totalAuto} Batch Auto-Mappings</span>`;
+        btnProcessText.innerText = `Bulk Process ${count} / ${MAX_BULK_FILES} Files`;
+        outLabel.innerHTML = `<i data-lucide="file-edit" class="w-3.5 h-3.5 text-emerald-400"></i> Bulk Output Prefix (Optional):`;
+        outBadge.innerText = "Optional Prefix";
+        outInput.placeholder = "Optional prefix (leave blank for <source>_" + selectedTemplateVersion + ".xlsx)...";
+      }
+      lucide.createIcons();
+    }
+
+    function removeQueuedFile(index) {
+      queuedFiles.splice(index, 1);
+      renderFileQueueUI();
+    }
+
+    function clearFileQueue() {
+      queuedFiles = [];
+      renderFileQueueUI();
+      logToConsole("[Queue] Cleared bulk file queue.");
+    }
+
+    async function applySelectedFiles(items, append = false) {
+      let next = append ? [...queuedFiles] : [];
+      for (const item of items) {
+        if (next.length >= MAX_BULK_FILES) {
+          logToConsole(`[ERROR] Bulk limit reached: maximum ${MAX_BULK_FILES} files allowed per batch.`);
+          break;
+        }
+        if (!next.some(existing => existing.filepath === item.filepath)) {
+          next.push(item);
+        }
+      }
+      queuedFiles = next;
+      renderFileQueueUI();
+      items.forEach(item => {
+        logToConsole(`[Source] Loaded: ${item.filename} (${item.total_rows ?? '?'} lines, ${item.total_journals ?? 1} journals)`);
+        logSchemaDiscovery(item, item.filename);
+      });
+    }
+
+    async function setSourceFile(fullPath, filename, meta = null) {
       let detected = meta;
       if (!detected || detected.total_rows === undefined || detected.total_rows === null) {
         try {
           const api = await getApi();
           if (api && api.inspect_source_file) {
-            const info = await api.inspect_source_file(currentSourcePath);
-            if (info && info.success) {
-              detected = info;
-            }
+            const info = await api.inspect_source_file(fullPath, selectedTemplateId);
+            if (info && info.success) detected = info;
           }
         } catch (e) {
           console.warn("inspect_source_file error:", e);
         }
       }
-
-      if (detected && detected.total_rows !== undefined && detected.total_rows !== null) {
-        labelEl.innerText = `${currentSourceFilename} — Auto-Detected (${detected.total_rows} lines, ${detected.total_journals || 1} journals)`;
-        logToConsole(`[Engine] Auto-detected file structure: ${currentSourceFilename} (${detected.total_rows} line records, ${detected.total_journals || 1} unique journal headers)`);
-      } else {
-        labelEl.innerText = currentSourceFilename;
-        logToConsole(`[Source] Active source selected: ${currentSourceFilename}`);
-      }
+      const entry = {
+        filepath: fullPath,
+        filename: filename || fullPath.split('\\').pop().split('/').pop(),
+        size: detected ? detected.size : 0,
+        total_rows: detected ? detected.total_rows : null,
+        total_journals: detected ? detected.total_journals : null,
+        format: detected ? detected.format : null,
+        auto_discovered_mappings: detected ? (detected.auto_discovered_mappings || []) : [],
+        intercompany_source_col: detected ? detected.intercompany_source_col : null,
+        unmapped_populated_columns: detected ? (detected.unmapped_populated_columns || []) : [],
+      };
+      await applySelectedFiles([entry], false);
     }
 
-    async function browseSourceFile() {
+    async function browseSourceFile(append = false) {
+      appendBrowseMode = !!append;
       const api = await getApi();
       if (api && api.select_file) {
         try {
-          const res = await api.select_file();
+          const res = await api.select_file(true, selectedTemplateId);
+          if (res && res.files && res.files.length > 0) {
+            if (res.exceeded_limit) {
+              logToConsole(`[Limit] Selected ${res.selected_count} files; capped at maximum ${MAX_BULK_FILES} files.`);
+            }
+            await applySelectedFiles(res.files, appendBrowseMode);
+            return;
+          }
           if (res && res.filepath) {
             await setSourceFile(res.filepath, res.filename || res.name, res);
-            if (res.size) {
-              logToConsole(`[Source] Loaded local file: ${res.filename || res.name} (${formatBytes(res.size)})`);
-            }
             return;
           }
           if (res && res.cancelled) {
@@ -608,7 +770,7 @@
       }
     }
 
-    function selectTemplate(tplId) {
+    async function selectTemplate(tplId) {
       selectedTemplateId = tplId;
       const t = TEMPLATES[tplId] || TEMPLATES['v45'];
       selectedTemplateVersion = t.version;
@@ -628,9 +790,35 @@
       });
 
       logToConsole(`[Template] Switched target template to ${t.version} (${t.file})`);
+
+      // Re-analyze queued files against newly selected target template
+      if (queuedFiles.length > 0) {
+        const api = await getApi();
+        if (api && api.analyze_schema) {
+          for (const f of queuedFiles) {
+            try {
+              const rep = await api.analyze_schema(f.filepath, selectedTemplateId);
+              if (rep && rep.success) {
+                f.auto_discovered_mappings = rep.auto_discovered_mappings || [];
+                f.intercompany_source_col = rep.intercompany_source_col;
+                f.unmapped_populated_columns = rep.unmapped_populated_columns || [];
+                logSchemaDiscovery(f, f.filename);
+              }
+            } catch (e) {
+              console.warn("re-analyze error:", e);
+            }
+          }
+        }
+        renderFileQueueUI();
+      }
     }
 
     async function runIngestPipeline() {
+      if (queuedFiles.length > 1) {
+        await runBulkQueuePipeline();
+        return;
+      }
+
       const srcName = currentSourcePath || currentSourceFilename;
       if (!srcName) {
         logToConsole(`[ERROR] Please browse and select a source accounting file (.xlsx or .csv) in Step 1 first.`);
@@ -680,16 +868,23 @@
         const debits = summary.total_debit !== undefined ? `$${Number(summary.total_debit).toLocaleString('en-US', {minimumFractionDigits: 2})}` : "$0.00";
         const credits = summary.total_credit !== undefined ? `$${Number(summary.total_credit).toLocaleString('en-US', {minimumFractionDigits: 2})}` : debits;
         const scCount = summary.spend_categories_mapped ?? 0;
+        const icCount = summary.intercompany_mapped_count ?? 0;
+        const autoCols = summary.auto_mapped_columns || [];
         lastGeneratedFile = data.target_path || data.target_file;
 
         logToConsole(`[Ingest] Successfully mapped ${lines} records from source.`);
         logToConsole(`[SpendCategory] Looked up ${scCount} accounts from Spend Category Mapped Ledger Account.xlsx.`);
+        if (icCount > 0) {
+          logToConsole(`[Intercompany] Mapped Intercompany Affiliate on ${icCount} line(s) (Col AC).`);
+        }
+        if (autoCols.length > 0) {
+          logToConsole(`[AutoMap] Automatically mapped ${autoCols.length} additional source/target column(s).`);
+        }
         logToConsole(`[Balance] Debits: ${debits} | Credits: ${credits} | Net Variance: $0.00 (100% BALANCED).`);
         logToConsole(`[LineMemo] Strict Null/Blank handling: 'NULL' and empty cells left completely blank.`);
         logToConsole(`[Saved] File saved to: ${lastGeneratedFile}`);
         logToConsole(`>>> INGESTION FINISHED WITH STATUS: SUCCESS\n`);
 
-        // Update UI Status Box
         document.getElementById("execBadge").innerText = "INGESTION COMPLETED (100% BALANCED)";
         document.getElementById("execMessage").innerText = `Generated: ${data.target_file} (${lines} rows, ${debits} balanced). Saved to: ${lastGeneratedFile}`;
         document.getElementById("execTimestamp").innerText = new Date().toLocaleTimeString();
@@ -702,7 +897,67 @@
         document.getElementById("statusBarState").innerText = "Error";
       } finally {
         btn.disabled = false;
-        btnText.innerText = "Ingest & Generate EIB Spreadsheet";
+        renderFileQueueUI();
+      }
+    }
+
+    async function runBulkQueuePipeline() {
+      if (queuedFiles.length > MAX_BULK_FILES) {
+        logToConsole(`[ERROR] Bulk limit is ${MAX_BULK_FILES} files maximum.`);
+        return;
+      }
+      const btn = document.getElementById("btnProcess");
+      const btnText = document.getElementById("btnProcessText");
+      const nameInput = document.getElementById("outputFileNameInput");
+      const prefix = nameInput ? nameInput.value.trim() : "";
+
+      btn.disabled = true;
+      btnText.innerText = `Bulk Processing ${queuedFiles.length} Files...`;
+      document.getElementById("statusBarState").innerText = "Bulk Processing...";
+
+      logToConsole(`\n>>> STARTING BULK EIB INGESTION (${queuedFiles.length} / ${MAX_BULK_FILES} FILES)...`);
+      logToConsole(`[Config] Template: ${selectedTemplateVersion} | Output Dir: ${currentSaveLocation}`);
+
+      try {
+        const api = await getApi();
+        if (!api || !api.process_bulk) {
+          throw new Error("Desktop bulk processing bridge is unavailable.");
+        }
+
+        const paths = queuedFiles.map(f => f.filepath);
+        const res = await api.process_bulk(paths, selectedTemplateId, currentSaveLocation, prefix || null);
+        if (!res || (!res.success && !res.results)) {
+          throw new Error((res && res.error) || "Bulk processing error.");
+        }
+
+        (res.results || []).forEach((item, idx) => {
+          const fname = (item.source_file || "").split("\\").pop().split("/").pop();
+          if (item.success) {
+            const ic = item.intercompany_mapped_count || 0;
+            const autoC = (item.auto_mapped_columns || []).length;
+            logToConsole(`  [${idx + 1}/${res.total_files}] OK: ${fname} -> ${item.output_file} (${item.total_lines_written} lines, Interco=${ic}, AutoCols=${autoC})`);
+            lastGeneratedFile = item.output_file;
+          } else {
+            logToConsole(`  [ERROR] [${idx + 1}/${res.total_files}] FAILED: ${fname} -> ${item.error}`);
+          }
+        });
+
+        const totDeb = `$${Number(res.total_debit || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+        logToConsole(`[Bulk Summary] ${res.succeeded}/${res.total_files} succeeded | Total Lines: ${res.total_lines_written} | Debits: ${totDeb}`);
+        logToConsole(`>>> BULK INGESTION COMPLETED\n`);
+
+        document.getElementById("execBadge").innerText = `BULK COMPLETED (${res.succeeded}/${res.total_files})`;
+        document.getElementById("execMessage").innerText = `Processed ${res.succeeded}/${res.total_files} files (${res.total_lines_written} total lines) into '${res.output_dir}'.`;
+        document.getElementById("execTimestamp").innerText = new Date().toLocaleTimeString();
+        document.getElementById("statusBarState").innerText = "Completed (Ready)";
+      } catch (err) {
+        logToConsole(`[ERROR] ${err.message}`);
+        document.getElementById("execBadge").innerText = "BULK EXECUTION ISSUE";
+        document.getElementById("execMessage").innerText = err.message;
+        document.getElementById("statusBarState").innerText = "Error";
+      } finally {
+        btn.disabled = false;
+        renderFileQueueUI();
       }
     }
 

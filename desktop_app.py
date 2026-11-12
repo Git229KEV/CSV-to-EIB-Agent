@@ -19,13 +19,16 @@ else:
 
 from run_agent import (
     process_journal as run_agent_process,
+    process_bulk as run_agent_process_bulk,
+    analyze_schema as run_agent_analyze_schema,
     find_source_file,
     find_target_file,
     resolve_target_file,
     get_output_filename,
     load_source_dataframe,
     pd,
-    TARGET_TEMPLATES
+    TARGET_TEMPLATES,
+    MAX_BULK_FILES
 )
 
 class DesktopApi:
@@ -39,8 +42,8 @@ class DesktopApi:
     def is_desktop(self):
         return True
 
-    def inspect_source_file(self, filepath):
-        """Automatically inspects an uploaded/selected source file and detects record & journal counts."""
+    def inspect_source_file(self, filepath, target_template="v45"):
+        """Automatically inspects an uploaded/selected source file, counts records, and analyzes schema vs template."""
         try:
             resolved = find_source_file(filepath)
             if not resolved or not os.path.exists(resolved):
@@ -55,14 +58,36 @@ class DesktopApi:
                 if key not in seen_keys:
                     seen_keys.append(key)
             ext = os.path.splitext(resolved)[1].upper().lstrip(".") or "XLSX"
+
+            schema = {}
+            try:
+                tpl_path = resolve_target_file(target_template)
+                schema = run_agent_analyze_schema(resolved, tpl_path)
+            except Exception:
+                schema = {}
+
             return {
                 "success": True,
                 "filepath": resolved,
                 "filename": os.path.basename(resolved),
+                "size": os.path.getsize(resolved) if os.path.exists(resolved) else 0,
                 "total_rows": len(df),
                 "total_journals": max(len(seen_keys), 1) if len(df) > 0 else 0,
-                "format": ext
+                "format": ext,
+                "source_columns": schema.get("source_columns", []),
+                "intercompany_source_col": schema.get("intercompany_source_col"),
+                "auto_discovered_mappings": schema.get("auto_discovered_mappings", []),
+                "unmapped_populated_columns": schema.get("unmapped_populated_columns", []),
             }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def analyze_schema(self, filepath, target_template="v45"):
+        """Analyzes source columns vs selected target template columns and returns auto-discovered mappings."""
+        try:
+            tpl_path = resolve_target_file(target_template)
+            report = run_agent_analyze_schema(filepath, tpl_path)
+            return {"success": True, **report}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -77,45 +102,71 @@ class DesktopApi:
 
         return {
             "workspace_dir": os.path.abspath("."),
-            "default_output_dir": default_out
+            "default_output_dir": default_out,
+            "max_bulk_files": MAX_BULK_FILES
         }
 
-    def select_file(self):
-        """Opens native OS file chooser dialog, auto-detects file contents, and returns selected path."""
+    def select_file(self, allow_multiple=True, target_template="v45"):
+        """Opens native OS file chooser dialog (supports single or bulk up to 12 files) and analyzes schema."""
         if not self._window:
-            return {"success": False, "filepath": None}
+            return {"success": False, "filepath": None, "files": []}
         try:
             try:
                 result = self._window.create_file_dialog(
                     webview.OPEN_DIALOG,
-                    allow_multiple=False,
+                    allow_multiple=bool(allow_multiple),
                     file_types=('Excel and CSV Files (*.xlsx;*.xls;*.csv)', 'All files (*.*)')
                 )
             except Exception:
                 result = self._window.create_file_dialog(
                     webview.OPEN_DIALOG,
-                    allow_multiple=False
+                    allow_multiple=bool(allow_multiple)
                 )
             if result and len(result) > 0:
-                selected_path = result[0]
-                info = self.inspect_source_file(selected_path)
+                selected_list = list(result)
+                exceeded = len(selected_list) > MAX_BULK_FILES
+                selected_count = len(selected_list)
+                capped = selected_list[:MAX_BULK_FILES]
+
+                inspected_files = []
+                for p in capped:
+                    info = self.inspect_source_file(p, target_template=target_template)
+                    if info.get("success"):
+                        inspected_files.append(info)
+                    else:
+                        inspected_files.append({
+                            "success": False,
+                            "filepath": p,
+                            "filename": os.path.basename(p),
+                            "size": os.path.getsize(p) if os.path.exists(p) else 0,
+                            "error": info.get("error")
+                        })
+
+                first = inspected_files[0]
                 return {
                     "success": True,
-                    "filepath": selected_path,
-                    "path": selected_path,
-                    "filename": os.path.basename(selected_path),
-                    "name": os.path.basename(selected_path),
-                    "size": os.path.getsize(selected_path) if os.path.exists(selected_path) else 0,
-                    "total_rows": info.get("total_rows") if info.get("success") else None,
-                    "total_journals": info.get("total_journals") if info.get("success") else None,
-                    "format": info.get("format") if info.get("success") else None
+                    "filepath": first["filepath"],
+                    "path": first["filepath"],
+                    "filename": first["filename"],
+                    "name": first["filename"],
+                    "size": first.get("size", 0),
+                    "total_rows": first.get("total_rows"),
+                    "total_journals": first.get("total_journals"),
+                    "format": first.get("format"),
+                    "auto_discovered_mappings": first.get("auto_discovered_mappings", []),
+                    "intercompany_source_col": first.get("intercompany_source_col"),
+                    "unmapped_populated_columns": first.get("unmapped_populated_columns", []),
+                    "files": inspected_files,
+                    "exceeded_limit": exceeded,
+                    "selected_count": selected_count,
+                    "max_bulk_files": MAX_BULK_FILES,
                 }
-            return {"success": False, "cancelled": True, "filepath": None}
+            return {"success": False, "cancelled": True, "filepath": None, "files": []}
         except Exception as e:
             print(f"[DesktopApp] File dialog error: {e}", flush=True)
-        return {"success": False, "filepath": None}
+        return {"success": False, "filepath": None, "files": []}
 
-    def stage_uploaded_file(self, filename, base64_data):
+    def stage_uploaded_file(self, filename, base64_data, target_template="v45"):
         """Stages a file selected via HTML <input type='file'> into a local temp path and auto-detects structure."""
         try:
             if "," in base64_data:
@@ -127,7 +178,7 @@ class DesktopApi:
             staged_path = os.path.join(stage_dir, safe_name)
             with open(staged_path, "wb") as f:
                 f.write(raw_bytes)
-            info = self.inspect_source_file(staged_path)
+            info = self.inspect_source_file(staged_path, target_template=target_template)
             return {
                 "success": True,
                 "filepath": staged_path,
@@ -135,7 +186,10 @@ class DesktopApi:
                 "size": len(raw_bytes),
                 "total_rows": info.get("total_rows") if info.get("success") else None,
                 "total_journals": info.get("total_journals") if info.get("success") else None,
-                "format": info.get("format") if info.get("success") else None
+                "format": info.get("format") if info.get("success") else None,
+                "auto_discovered_mappings": info.get("auto_discovered_mappings", []),
+                "intercompany_source_col": info.get("intercompany_source_col"),
+                "unmapped_populated_columns": info.get("unmapped_populated_columns", []),
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -220,6 +274,31 @@ class DesktopApi:
                 "target_template": target_template,
                 "summary": res
             }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def process_bulk(self, filepaths, target_template="v45", output_dir=None, output_prefix=None):
+        """Bulk processes up to 12 selected source files into the chosen Workday EIB template."""
+        try:
+            if not filepaths or not isinstance(filepaths, (list, tuple)):
+                return {"success": False, "error": "Please select at least 1 file for bulk processing."}
+            if len(filepaths) > MAX_BULK_FILES:
+                return {"success": False, "error": f"Bulk processing supports a maximum of {MAX_BULK_FILES} files per batch (selected {len(filepaths)})."}
+
+            if output_dir and not os.path.exists(output_dir):
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                except Exception:
+                    output_dir = None
+
+            target_path = resolve_target_file(target_template)
+            res = run_agent_process_bulk(
+                source_files=list(filepaths),
+                excel_template=target_path,
+                output_dir=output_dir,
+                output_prefix=output_prefix
+            )
+            return res
         except Exception as e:
             return {"success": False, "error": str(e)}
 
