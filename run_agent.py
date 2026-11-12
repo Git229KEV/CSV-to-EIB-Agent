@@ -512,6 +512,16 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
         total_credits = 0.0
         spend_matched_count = 0
 
+        # Resolve Sheet 2 column positions dynamically from Row 5 headers (supports updated v45.1 schema where
+        # Intercompany Affiliate is Col 29/AC and Balancing Worktag Affiliate shifted to Col 31/AE)
+        line_hdr_cols = {
+            str(ws_line.cell(row=5, column=c).value).strip(): c
+            for c in range(1, ws_line.max_column + 1)
+            if ws_line.cell(row=5, column=c).value is not None
+        }
+        col_intercompany = line_hdr_cols.get("Intercompany Affiliate")
+        col_balancing_affiliate = line_hdr_cols.get("Balancing Worktag Affiliate", 31)
+
         for idx, row in df.iterrows():
             r_key = row.get("HeaderKey") if "HeaderKey" in row and pd.notna(row.get("HeaderKey")) else (row.get("JournalKey") or row.get("AccountingJournalID"))
             if "HeaderKey" in row and pd.notna(row.get("HeaderKey")):
@@ -572,7 +582,15 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
             if cc_3digit is not None:
                 cell_cc.number_format = "@"
 
-            ws_line.cell(row=line_row, column=29, value=clean_val(row.get("Worktag_Business_Unit_ID")) or clean_val(row.get("OptionalBalancingWorktags_Business_Unit_ID")))
+            if col_intercompany:
+                interco_val = (
+                    clean_val(row.get("Worktag_Intercompany_Affiliate_ID"))
+                    or clean_val(row.get("IntercompanyAffiliate"))
+                    or clean_val(row.get("Intercompany_Affiliate_ID"))
+                )
+                ws_line.cell(row=line_row, column=col_intercompany, value=interco_val)
+
+            ws_line.cell(row=line_row, column=col_balancing_affiliate, value=clean_val(row.get("Worktag_Business_Unit_ID")) or clean_val(row.get("OptionalBalancingWorktags_Business_Unit_ID")))
 
             line_row += 1
 

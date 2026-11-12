@@ -4,8 +4,8 @@
 
 ### Enterprise Desktop Application & Automated Data Transformation Engine (`v45.1` – `v48.0`)
 
-[![Release](https://img.shields.io/badge/Release-v1.1.0-10b981?style=for-the-badge&logo=github)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/tag/v1.1.0)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20Desktop%20(.EXE)-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.1.0/WorkdayEIBStudio.exe)
+[![Release](https://img.shields.io/badge/Release-v1.2.0-10b981?style=for-the-badge&logo=github)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/tag/v1.2.0)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20Desktop%20(.EXE)-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.2.0/WorkdayEIBStudio.exe)
 [![Workday EIB](https://img.shields.io/badge/Workday%20EIB-v45.1%20%7C%20v46.0%20%7C%20v47.0%20%7C%20v48.0-f59e0b?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
 [![Architecture](https://img.shields.io/badge/Engine-Native%20IPC%20%2B%20OpenPyXL-8b5cf6?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
 [![Balance Verification](https://img.shields.io/badge/Debit%2FCredit%20Variance-%240.00%20(100%25%20Balanced)-10b981?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.1.0/WorkdayEIBStudio.exe"><strong>⬇ Download Standalone Windows Executable (WorkdayEIBStudio.exe — v1.1.0)</strong></a>
+  <a href="https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.2.0/WorkdayEIBStudio.exe"><strong>⬇ Download Standalone Windows Executable (WorkdayEIBStudio.exe — v1.2.0)</strong></a>
   &nbsp;•&nbsp;
   <a href="#-step-by-step-guide-how-to-upload--process-a-file"><strong>How to Upload & Process</strong></a>
   &nbsp;•&nbsp;
@@ -183,7 +183,8 @@ erDiagram
         string Col_W_Revenue_Category "Worktag_Revenue_Category_ID"
         string Col_Y_Spend_Category "Looked up from Spend Category Map"
         string Col_AA_Cost_Center "3-Digit Text '@' (000, 070, 090, 200)"
-        string Col_AC_Balancing_Affiliate "Worktag_Business_Unit_ID"
+        string Col_AC_Intercompany_Affiliate "Company_Reference_ID (Optional)"
+        string Col_AE_Balancing_Affiliate "Worktag_Business_Unit_ID"
     }
 ```
 
@@ -244,7 +245,7 @@ The application window is organized into a **12-column split-grid workbench** wi
 ### Method A: Using the Enterprise Desktop Application (`WorkdayEIBStudio.exe`)
 
 > [!TIP]
-> **No Python installation is required** to run the standalone executable. Download [`WorkdayEIBStudio.exe`](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.1.0/WorkdayEIBStudio.exe) from the [**Releases**](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases) page and double-click it to launch.
+> **No Python installation is required** to run the standalone executable. Download [`WorkdayEIBStudio.exe`](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.2.0/WorkdayEIBStudio.exe) from the [**Releases**](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases) page and double-click it to launch.
 
 #### Step 1 — Browse & Upload Your Source Accounting File (Panel 1)
 1. Next to the `"Select or browse source accounting file..."` input box in **Panel 1 (`Source Accounting File`)**, click the **`Browse File...`** button.
@@ -348,7 +349,8 @@ python run_agent.py --source "source/Accounting_Journal_Raw_LE01_202501.xlsx" --
 | **`W`** | `23` | **Revenue Category** | Mapped from `Worktag_Revenue_Category_ID`. |
 | **`Y`** | `25` | **Spend Category** | **Looked up dynamically from `Spend Category Mapped Ledger Account.xlsx`** using `Ledger Account` (`Col F`), with fallback to `Worktag_Spend_Category_ID`. |
 | **`AA`** | `27` | **Cost Center** | Mapped from `Worktag_Cost_Center_Reference_ID`, zero-padded to a **3-digit string** (`'000'`, `'070'`, `'090'`, `'200'`) with Excel text format `@`. |
-| **`AC`** | `29` | **Balancing Worktag Affiliate** | Mapped from `Worktag_Business_Unit_ID` (or `OptionalBalancingWorktags_Business_Unit_ID`). |
+| **`AC`** | `29` | **Intercompany Affiliate** | Mapped from `Worktag_Intercompany_Affiliate_ID` / `IntercompanyAffiliate` if present in source (otherwise blank). |
+| **`AE`** | `31` | **Balancing Worktag Affiliate** | Mapped from `Worktag_Business_Unit_ID` (or `OptionalBalancingWorktags_Business_Unit_ID`) via dynamic Row 5 header detection. |
 
 ---
 

@@ -59,4 +59,5 @@ Rows 1–5 are metadata and header rows. Data rows start at Row 6.
 - **Revenue Category** (`Col W` / Col 23): `Worktag_Revenue_Category_ID`.
 - **Spend Category** (`Col Y` / Col 25): `Worktag_Spend_Category_ID`.
 - **Cost Center** (`Col AA` / Col 27): **Formatted as a 3-digit number** (e.g., `'000'`, `'090'`, `'070'`, `'200'`) with text format `@` to preserve leading zeros.
-- **Balancing Worktag Affiliate** (`Col AC` / Col 29): `Worktag_Business_Unit_ID`.
+- **Intercompany Affiliate** (`Col AC` / Col 29): `Worktag_Intercompany_Affiliate_ID` / `IntercompanyAffiliate` (blank if absent in source).
+- **Balancing Worktag Affiliate** (`Col AE` / Col 31): `Worktag_Business_Unit_ID`.

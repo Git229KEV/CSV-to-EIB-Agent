@@ -51,7 +51,8 @@
       {"source": "Worktag_Revenue_Category_ID", "eib": "W", "col": 23, "label": "Revenue Category"},
       {"source": "Worktag_Spend_Category_ID / Spend Category Mapped Ledger Account.xlsx", "eib": "Y", "col": 25, "label": "Spend Category", "rule": "Mapped from Ledger Account via 'Spend Category Mapped Ledger Account.xlsx'"},
       {"source": "Worktag_Cost_Center_Reference_ID", "eib": "AA", "col": 27, "label": "Cost Center", "transform": "3_digit_str", "rule": "Formatted as 3-digit number (e.g. '000', '090', '070', '200')"},
-      {"source": "Worktag_Business_Unit_ID", "eib": "AC", "col": 29, "label": "Balancing Worktag Affiliate"}
+      {"source": "Worktag_Intercompany_Affiliate_ID", "eib": "AC", "col": 29, "label": "Intercompany Affiliate", "rule": "Mapped from Intercompany Affiliate if present in source, otherwise blank"},
+      {"source": "Worktag_Business_Unit_ID", "eib": "AE", "col": 31, "label": "Balancing Worktag Affiliate"}
     ]
   }
 }

@@ -101,7 +101,8 @@ Key Features:
 | **Revenue Category** | `W` | 23 | `Worktag_Revenue_Category_ID` |
 | **Spend Category** | **`Y`** | **25** | **Looked up from `Spend Category Mapped Ledger Account.xlsx` based on `Ledger Account` (Col 6)** |
 | **Cost Center** | **`AA`** | **27** | **Formatted as 3-digit number** (e.g. `'000'`, `'090'`, `'070'`, `'200'`) |
-| **Balancing Worktag Affiliate** | `AC` | 29 | `Worktag_Business_Unit_ID` |
+| **Intercompany Affiliate** | **`AC`** | **29** | `Worktag_Intercompany_Affiliate_ID` / `IntercompanyAffiliate` (blank if absent) |
+| **Balancing Worktag Affiliate** | **`AE`** | **31** | `Worktag_Business_Unit_ID` |
 
 ---
 
