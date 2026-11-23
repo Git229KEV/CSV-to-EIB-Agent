@@ -43,7 +43,7 @@
 - **Multi-Template Workday EIB Support (`v45.1` to `v48.0`)**:
   - **Two-Sheet Relational (`v45.1`)**: Populates `Import Accounting Journal` (Sheet 1 — Journal Headers) and `Journal Entry Line Replacement` (Sheet 2 — Journal Lines) linked via `Header Key`.
   - **Single-Sheet Unified (`v46.0`, `v47.0`, `v48.0`)**: Populates `Submit Accounting Journal` across 96 Workday metadata columns with dedicated 1:1 worktag columns.
-- **Automated Spend Category Lookup Engine**: Cross-references every line's `Ledger Account` against `Spend Category Mapped Ledger Account.xlsx` (108 ledger account rules) and injects the matching Workday `Spend Category` (`SC048`, `SC049`, `SC098`, `SC043`, etc.).
+- **Automated Spend Category Lookup Engine**: Cross-references every line's `Ledger Account` against `spend category.xlsx` (154 ledger account rules) and injects the matching Workday `Spend Category` (`SC048`, `SC049`, `SC088`, `SC098`, `SC043`, etc.).
 - **100% Financial Balance & Data Hygiene Verification**: Automatically validates `Total Debits == Total Credits` (`$0.00` net variance), enforces strict blank handling on `NULL` memo cells, preserves explicit `0.0` amounts, and formats 3-digit Cost Centers (`000`, `070`, `090`, `200`) as Excel text `@`.
 
 ---
@@ -68,7 +68,7 @@ flowchart TD
 
     subgraph ENGINE["Core Transformation Engine (run_agent.py)"]
         G["_PandasLite Reader<br/>OpenPyXL + UTF-8 CSV DictReader"]
-        H["Spend Category Lookup<br/>Spend Category Mapped Ledger Account.xlsx (108 Accounts)"]
+        H["Spend Category Lookup<br/>spend category.xlsx (154 Accounts)"]
         I{"Template Inspector<br/>Two-Sheet vs Single-Sheet?"}
         J["Two-Sheet Mapper (v45.1)<br/>Sheet 1: Import Accounting Journal (Rows 6..N)<br/>Sheet 2: Journal Entry Line Replacement (Rows 6..M)"]
         K["Single-Sheet Mapper (v46 / v47 / v48)<br/>Sheet 1: Submit Accounting Journal (96 Cols, Rows 6..M)"]
@@ -346,9 +346,9 @@ python run_agent.py --source "source/Accounting_Journal_Raw_LE01_202501.xlsx" --
 | **`U`** | `21` | **External Reference ID** | Mapped from `JournalLineExternalReferenceID`. |
 | **`V`** | `22` | **Budget Date** | Mapped from `BudgetDate` (`YYYY-MM-DD`). |
 | **`W`** | `23` | **Revenue Category** | Mapped from `Worktag_Revenue_Category_ID`. |
-| **`Y`** | `25` | **Spend Category** | **Looked up dynamically from `Spend Category Mapped Ledger Account.xlsx`** using `Ledger Account` (`Col F`), with fallback to `Worktag_Spend_Category_ID`. |
+| **`Y`** | `25` | **Spend Category** | **Looked up dynamically from `spend category.xlsx`** (154 accounts) using `Ledger Account` (`Col F`), with fallback to `Worktag_Spend_Category_ID`. |
 | **`AA`** | `27` | **Cost Center** | Mapped from `Worktag_Cost_Center_Reference_ID`, zero-padded to a **3-digit string** (`'000'`, `'070'`, `'090'`, `'200'`) with Excel text format `@`. |
-| **`AC`** | `29` | **Intercompany Affiliate** | Mapped from `Worktag_Intercompany_Affiliate_ID` / `IntercompanyAffiliate` if present in source (otherwise blank). |
+| **`AC`** | `29` | **Intercompany Affiliate** | Mapped from `Worktag_Intercompany_Affiliate_ID`, `IntercompanyAffiliate`, `Affliate Company`, `Affiliate Company`, or `Affiliate` if present in source (otherwise blank; underscores in `Affliate_Company` automatically stripped). |
 | **`AE`** | `31` | **Balancing Worktag Affiliate** | Mapped from `Worktag_Business_Unit_ID` (or `OptionalBalancingWorktags_Business_Unit_ID`) via dynamic Row 5 header detection. |
 
 ---
@@ -371,7 +371,7 @@ For single-sheet Workday EIB templates, header and line fields are combined onto
 | **`AP`, `AQ`, `AR`** | `42, 43, 44` | **Debit Amount / Credit Amount / Currency** | `DebitAmount` (`#,##0.00`) / `CreditAmount` (`#,##0.00`) / `'USD'`. |
 | **`AZ`** | `52` | **Memo** | `LineMemo` (`NULL` or empty strictly mapped as `None` blank cell). |
 | **`BC`** | `55` | **Cost Center** | 3-digit string (`'000'`, `'070'`, `'090'`, `'200'`) with `@` text formatting. |
-| **`BE`** | `57` | **Spend Category** | Looked up from `Spend Category Mapped Ledger Account.xlsx`. |
+| **`BE`** | `57` | **Spend Category** | Looked up from `spend category.xlsx` (154 accounts). |
 | **`BG`, `BI`, `BK`, `BM`** | `59, 61, 63, 65` | **Business Unit / Custom Org / Worktag 1 / Revenue Cat** | Mapped from corresponding `Worktag_*` columns in source. |
 
 ---
@@ -416,7 +416,8 @@ CSV-to-EIB-Agent/
 │   ├── Accounting_Journal_Raw_02_202601.xlsx         # Alternate 2026 raw source dataset
 │   ├── Accounting_Journal_RawAgg_01_202501.xlsx      # Alternate 2025 aggregated source dataset
 │   ├── FPEAST_HSTBAL_155_2023P05_20230711071408.csv  # Historical balance CSV source (189 lines)
-│   └── Spend Category Mapped Ledger Account.xlsx     # Master lookup table (108 Ledger Account -> Spend Category mappings)
+│   ├── spend category.xlsx                           # Master lookup table (154 Ledger Account -> Spend Category mappings)
+│   └── Spend Category Mapped Ledger Account.xlsx     # Legacy lookup table (108 Ledger Account mappings)
 ├── target/
 │   ├── Import_Accounting_Journal_v45.1.template.xlsx # Official Workday v45.1 Two-Sheet base template
 │   ├── Submit_Accounting_Journal_v46.0.xlsx          # Official Workday v46.0 Single-Sheet base template

@@ -253,28 +253,47 @@ def resolve_target_file(requested=None):
             return cand
     return find_target_file("Import_Accounting_Journal_v45.1.template.xlsx")
 
-SPEND_MAPPING_FILE = "Spend Category Mapped Ledger Account.xlsx"
+SPEND_MAPPING_FILE = "spend category.xlsx"
 
 # Sheet names in target v45.1 workbook
 SHEET_HEADER = "Import Accounting Journal"
 SHEET_LINES = "Journal Entry Line Replacement"
 
 def load_spend_category_map(mapping_file=None):
-    """Loads ledger account -> spend category lookup dictionary from Excel."""
+    """Loads ledger account -> spend category lookup dictionary from Excel.
+    Prefers 'spend category.xlsx' (154 accounts) with fallback to
+    'Spend Category Mapped Ledger Account.xlsx'.
+    """
     if mapping_file is None:
-        mapping_file = find_source_file(SPEND_MAPPING_FILE)
+        mapping_file = find_source_file("spend category.xlsx")
+        if not mapping_file or not os.path.exists(mapping_file):
+            mapping_file = find_source_file("Spend Category Mapped Ledger Account.xlsx")
     spend_map = {}
-    if not os.path.exists(mapping_file):
+    if not mapping_file or not os.path.exists(mapping_file):
         print(f"Warning: Spend mapping file '{mapping_file}' not found.")
         return spend_map
     try:
         df = pd.read_excel(mapping_file)
+        cols = list(df.columns)
+        acct_col = None
+        sc_col = None
+        for c in cols:
+            cl = str(c).strip().lower()
+            if "legacy" in cl or ("ledger" in cl and "account" in cl) or cl == "account":
+                acct_col = c
+            elif "spend" in cl or "category" in cl:
+                sc_col = c
+        if acct_col is None and len(cols) >= 1:
+            acct_col = cols[0]
+        if sc_col is None and len(cols) >= 2:
+            sc_col = cols[1]
+
         for _, row in df.iterrows():
-            acct = str(row.get("Ledger Account", "")).strip()
+            acct = str(row.get(acct_col, "")).strip()
             if acct.endswith(".0"):
                 acct = acct[:-2]
-            sc = str(row.get("Spend Category", "")).strip()
-            if acct and sc and sc.lower() != "nan":
+            sc = str(row.get(sc_col, "")).strip()
+            if acct and sc and sc.lower() not in ("nan", "none", ""):
                 spend_map[acct] = sc
         print(f"Loaded {len(spend_map)} spend category mappings from '{mapping_file}'.")
     except Exception as e:
@@ -349,6 +368,19 @@ def clean_memo(val):
     s = str(val).strip()
     if s == "" or s.upper() in ("NULL", "NONE", "NAN", "N/A"):
         return None
+    return s
+
+def clean_intercompany_affiliate(val):
+    """Cleans Intercompany Affiliate value.
+    If the value has an underscore in 'Affliate_Company' or 'Affiliate_Company',
+    removes the underscore so it becomes 'Affliate Company' / 'Affiliate Company'.
+    """
+    v = clean_val(val)
+    if v is None:
+        return None
+    s = str(v).strip()
+    s = re.sub(r"(?i)\baffliate_company\b", "Affliate Company", s)
+    s = re.sub(r"(?i)\baffiliate_company\b", "Affiliate Company", s)
     return s
 
 def clean_amount(val):
@@ -445,7 +477,7 @@ _WORKDAY_FIELD_ALIASES = {
         "Intercompany_Affiliate_ID", "Intercompany_Affiliate", "Worktag_Intercompany_Affliate_ID",
         "IntercompanyAffliate", "Intercompany Affliate", "Intercompany_Affliate_ID", "Intercompany_Affliate",
         "Worktag_Affiliate_ID", "Affiliate", "Affiliate_ID", "AffiliateID",
-        "Affiliate Company", "Affiliate_Company", "Affiliate_Company_ID",
+        "Affliate Company", "Affliate_Company", "Affiliate Company", "Affiliate_Company", "Affiliate_Company_ID",
         "Intercompany_Company_ID", "IntercompanyCompany", "Intercompany",
         "IntercoAffiliate", "Interco Affiliate", "Interco_Affiliate_ID", "Interco_Affiliate",
         "IC_Affiliate", "ICAffiliate", "TradingPartner", "Trading_Partner", "Trading Partner",
@@ -1108,7 +1140,7 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
             ws_line.cell(row=line_row, column=22, value=parse_date(_pick_source_val(row, col_lookup, "budgetdate")))
             ws_line.cell(row=line_row, column=23, value=clean_val(_pick_source_val(row, col_lookup, "revenuecategory")))
 
-            # Map Spend Category using Spend Category Mapped Ledger Account.xlsx
+            # Map Spend Category using spend category.xlsx
             acct_key = str(acct_clean).strip() if acct_clean is not None else ""
             mapped_sc = spend_map.get(acct_key) or clean_val(_pick_source_val(row, col_lookup, "spendcategory"))
             ws_line.cell(row=line_row, column=25, value=mapped_sc)
@@ -1121,7 +1153,7 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
                 cell_cc.number_format = "@"
 
             if col_intercompany:
-                interco_val = clean_val(_pick_source_val(row, col_lookup, "intercompanyaffiliate"))
+                interco_val = clean_intercompany_affiliate(_pick_source_val(row, col_lookup, "intercompanyaffiliate"))
                 ws_line.cell(row=line_row, column=col_intercompany, value=interco_val)
                 if interco_val is not None:
                     interco_mapped_count += 1
@@ -1386,7 +1418,7 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         if cc_3digit is not None:
             cell_cc.number_format = "@"
 
-        # Col BE (57): Spend Category mapped from Spend Category Mapped Ledger Account.xlsx
+        # Col BE (57): Spend Category mapped from spend category.xlsx
         acct_key = str(acct_clean).strip() if acct_clean is not None else ""
         mapped_sc = spend_map.get(acct_key) or clean_val(_pick_source_val(row, col_lookup, "spendcategory"))
         ws.cell(row=curr_row, column=57, value=mapped_sc)

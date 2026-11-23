@@ -17,9 +17,9 @@ Key Features:
   - Sheet 1 (`Import Accounting Journal`): **20 journal headers** (Rows 6 to 25, `Header Key* 1..20`).
   - Sheet 2 (`Journal Entry Line Replacement`): **222 journal lines** (Rows 6 to 227), with `Header Key` occurrences strictly preserved from source file.
   - `Line Key` mapped from `ROW_ID` and `Line Order` mapped from `LineOrder`.
-- **Spend Category Mapping Lookup (`Spend Category Mapped Ledger Account.xlsx`)**:
+- **Spend Category Mapping Lookup (`spend category.xlsx`)**:
   - The second sheet (`Journal Entry Line Replacement`) contains `Ledger Account` in Column F (Col 6) and `Spend Category` in Column Y (Col 25).
-  - For every record, the system references `Spend Category Mapped Ledger Account.xlsx` (108 accounts) and maps the matching `Spend Category` (e.g. `74900 -> SC098`, `74800 -> SC048`, `77100 -> SC049`, `75400 -> SC043`, etc.) into Column 25.
+  - For every record, the system references `spend category.xlsx` (154 accounts) and maps the matching `Spend Category` (e.g. `74900 -> SC098`, `74800 -> SC048`, `77100 -> SC049`, `75400 -> SC043`, `64100 -> SC088`, etc.) into Column 25.
 - **Date-Wise Output Generation**:
   - Output files are automatically saved into a date-stamped folder: `output/YYYY-MM-DD/` (e.g., `output/2026-10-29/`).
   - File names strictly follow the Workday standard:
@@ -47,7 +47,7 @@ Key Features:
                             v
 +-------------------------------------------------------+
 |  Spend Category Lookup Engine                         |
-|  - Reads 'Spend Category Mapped Ledger Account.xlsx'  |
+|  - Reads 'spend category.xlsx'                        |
 |  - Maps Ledger Account -> Spend Category              |
 +---------------------------+---------------------------+
                             |
@@ -99,9 +99,9 @@ Key Features:
 | **External Reference ID** | `U` | 21 | `JournalLineExternalReferenceID` |
 | **Budget Date** | `V` | 22 | `BudgetDate` |
 | **Revenue Category** | `W` | 23 | `Worktag_Revenue_Category_ID` |
-| **Spend Category** | **`Y`** | **25** | **Looked up from `Spend Category Mapped Ledger Account.xlsx` based on `Ledger Account` (Col 6)** |
+| **Spend Category** | **`Y`** | **25** | **Looked up from `spend category.xlsx` based on `Ledger Account` (Col 6)** |
 | **Cost Center** | **`AA`** | **27** | **Formatted as 3-digit number** (e.g. `'000'`, `'090'`, `'070'`, `'200'`) |
-| **Intercompany Affiliate** | **`AC`** | **29** | Auto-detected from `Worktag_Intercompany_Affiliate_ID`, `Intercompany Affiliate`, `Intercompany_Affiliate_ID`, `Affiliate`, or `TradingPartner` (blank if absent) |
+| **Intercompany Affiliate** | **`AC`** | **29** | Auto-detected from `Worktag_Intercompany_Affiliate_ID`, `Intercompany Affiliate`, `Affliate Company`, `Affiliate Company`, `Affiliate`, or `TradingPartner` (blank if absent; underscores in `Affliate_Company` automatically stripped) |
 | **Balancing Worktag Affiliate** | **`AE`** | **31** | `Worktag_Business_Unit_ID` (dynamic Row 5 lookup) |
 | **Additional / New Columns** | *Dynamic* | *Auto* | **Auto-Schema Discovery** matches any additional/new source & target columns (`Book Code`, `Document Link`, `Exclude from Spend Report`, `Supplier`, `Customer`, `Project`, etc.) |
 
