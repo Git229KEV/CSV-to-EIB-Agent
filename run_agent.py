@@ -372,15 +372,12 @@ def clean_memo(val):
 
 def clean_intercompany_affiliate(val):
     """Cleans Intercompany Affiliate value for Workday EIB mapping.
-    Removes underscores from ALL values under 'Intercompany Affiliate'
-    (e.g., 'Affliate_Company' -> 'Affliate Company', 'US_AFF_01' -> 'US AFF 01', 'LE_04' -> 'LE 04').
+    Removes underscores directly with no space added (e.g., 'LE_04' -> 'LE04', 'US_AFF_01' -> 'USAFF01').
     """
     v = clean_val(val)
     if v is None:
         return None
-    s = str(v).strip()
-    s = s.replace("_", " ")
-    s = re.sub(r"\s+", " ", s).strip()
+    s = str(v).strip().replace("_", "").strip()
     return s if s else None
 
 def clean_amount(val):

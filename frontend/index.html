@@ -571,7 +571,7 @@
       if (!meta) return;
       const prefix = prefixLabel ? `[Schema:${prefixLabel}]` : "[Schema]";
       if (meta.intercompany_source_col) {
-        logToConsole(`${prefix} Intercompany Affiliate matched source column '${meta.intercompany_source_col}' -> Col AC (underscores removed from values).`);
+        logToConsole(`${prefix} Intercompany Affiliate matched source column '${meta.intercompany_source_col}' -> Col AC (underscores removed, e.g. 'LE_04' -> 'LE04').`);
       }
       const autos = meta.auto_discovered_mappings || [];
       if (autos.length > 0) {
@@ -875,7 +875,7 @@
         logToConsole(`[Ingest] Successfully mapped ${lines} records from source.`);
         logToConsole(`[SpendCategory] Looked up ${scCount} accounts from spend category.xlsx.`);
         if (icCount > 0) {
-          logToConsole(`[Intercompany] Mapped Intercompany Affiliate on ${icCount} line(s) (Col AC - underscores stripped).`);
+          logToConsole(`[Intercompany] Mapped Intercompany Affiliate on ${icCount} line(s) (Col AC - underscores removed with no space, e.g. 'LE_04' -> 'LE04').`);
         }
         if (autoCols.length > 0) {
           logToConsole(`[AutoMap] Automatically mapped ${autoCols.length} additional source/target column(s).`);
