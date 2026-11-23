@@ -348,7 +348,7 @@ python run_agent.py --source "source/Accounting_Journal_Raw_LE01_202501.xlsx" --
 | **`W`** | `23` | **Revenue Category** | Mapped from `Worktag_Revenue_Category_ID`. |
 | **`Y`** | `25` | **Spend Category** | **Looked up dynamically from `spend category.xlsx`** (154 accounts) using `Ledger Account` (`Col F`), with fallback to `Worktag_Spend_Category_ID`. |
 | **`AA`** | `27` | **Cost Center** | Mapped from `Worktag_Cost_Center_Reference_ID`, zero-padded to a **3-digit string** (`'000'`, `'070'`, `'090'`, `'200'`) with Excel text format `@`. |
-| **`AC`** | `29` | **Intercompany Affiliate** | Mapped from `Worktag_Intercompany_Affiliate_ID`, `IntercompanyAffiliate`, `Affliate Company`, `Affiliate Company`, or `Affiliate` if present in source (otherwise blank; underscores in `Affliate_Company` automatically stripped). |
+| **`AC`** | `29` | **Intercompany Affiliate** | Mapped from `Worktag_Intercompany_Affiliate_ID`, `IntercompanyAffiliate`, `Affliate Company`, `Affiliate Company`, or `Affiliate` if present in source (otherwise blank; all underscores in values automatically stripped, e.g. `'Affliate_Company'` -> `'Affliate Company'`, `'US_AFF_01'` -> `'US AFF 01'`). |
 | **`AE`** | `31` | **Balancing Worktag Affiliate** | Mapped from `Worktag_Business_Unit_ID` (or `OptionalBalancingWorktags_Business_Unit_ID`) via dynamic Row 5 header detection. |
 
 ---

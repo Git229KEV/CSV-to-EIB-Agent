@@ -371,17 +371,17 @@ def clean_memo(val):
     return s
 
 def clean_intercompany_affiliate(val):
-    """Cleans Intercompany Affiliate value.
-    If the value has an underscore in 'Affliate_Company' or 'Affiliate_Company',
-    removes the underscore so it becomes 'Affliate Company' / 'Affiliate Company'.
+    """Cleans Intercompany Affiliate value for Workday EIB mapping.
+    Removes underscores from ALL values under 'Intercompany Affiliate'
+    (e.g., 'Affliate_Company' -> 'Affliate Company', 'US_AFF_01' -> 'US AFF 01', 'LE_04' -> 'LE 04').
     """
     v = clean_val(val)
     if v is None:
         return None
     s = str(v).strip()
-    s = re.sub(r"(?i)\baffliate_company\b", "Affliate Company", s)
-    s = re.sub(r"(?i)\baffiliate_company\b", "Affiliate Company", s)
-    return s
+    s = s.replace("_", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s if s else None
 
 def clean_amount(val):
     """Populates amounts including zero (0.0), matching the source file."""
@@ -1162,7 +1162,12 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
 
             # Auto-discovered line columns (any extra source or target columns)
             for am in line_auto_mappings:
-                val = _coerce_auto_val(row.get(am["source_col"]), am["target_format"])
+                raw_v = row.get(am["source_col"])
+                tgt_h = (am.get("target_header") or "").lower()
+                if "affiliate" in tgt_h or "affliate" in tgt_h or am.get("field_key") == "intercompanyaffiliate":
+                    val = clean_intercompany_affiliate(raw_v)
+                else:
+                    val = _coerce_auto_val(raw_v, am["target_format"])
                 if val is not None:
                     ws_line.cell(row=line_row, column=am["target_col_idx"], value=val)
 
@@ -1439,7 +1444,12 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
 
         # Auto-discovered extra source/target columns
         for am in auto_mappings:
-            val = _coerce_auto_val(row.get(am["source_col"]), am["target_format"])
+            raw_v = row.get(am["source_col"])
+            tgt_h = (am.get("target_header") or "").lower()
+            if "affiliate" in tgt_h or "affliate" in tgt_h or am.get("field_key") == "intercompanyaffiliate":
+                val = clean_intercompany_affiliate(raw_v)
+            else:
+                val = _coerce_auto_val(raw_v, am["target_format"])
             if val is not None:
                 ws.cell(row=curr_row, column=am["target_col_idx"], value=val)
 
