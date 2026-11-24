@@ -9,6 +9,7 @@ added_files = [
     ('frontend', 'frontend'),
     ('source', 'source'),
     ('target', 'target'),
+    ('spend category 1.xlsx', '.'),
     ('spend category.xlsx', '.'),
     ('mapping_import_accounting_journal.json', '.'),
     ('mapping_submit_accounting_journal.json', '.'),

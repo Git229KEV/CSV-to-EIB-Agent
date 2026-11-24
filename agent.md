@@ -57,7 +57,7 @@ Rows 1–5 are metadata and header rows. Data rows start at Row 6.
 - **External Reference ID** (`Col U` / Col 21): `JournalLineExternalReferenceID`.
 - **Budget Date** (`Col V` / Col 22): `BudgetDate`.
 - **Revenue Category** (`Col W` / Col 23): `Worktag_Revenue_Category_ID`.
-- **Spend Category** (`Col Y` / Col 25): Looked up dynamically from `spend category.xlsx` (154 accounts) based on `Ledger Account` (Col F), with fallback to `Worktag_Spend_Category_ID`.
+- **Spend Category** (`Col Y` / Col 25): Looked up dynamically from `spend category 1.xlsx` (155 accounts) based on `Ledger Account` (Col F), with fallback to `Worktag_Spend_Category_ID`.
 - **Cost Center** (`Col AA` / Col 27): **Formatted as a 3-digit number** (e.g., `'000'`, `'090'`, `'070'`, `'200'`) with text format `@` to preserve leading zeros.
 - **Intercompany Affiliate** (`Col AC` / Col 29): Auto-detected across Workday & ERP column variants (`Worktag_Intercompany_Affiliate_ID`, `IntercompanyAffiliate`, `Intercompany Affiliate`, `Affliate Company`, `Affiliate Company`, `Affiliate`, `TradingPartner`, etc.; blank if absent in source). Underscores are completely stripped from all mapped Intercompany Affiliate values with no spaces added (e.g., `'LE_04'` -> `'LE04'`).
 - **Balancing Worktag Affiliate** (`Col AE` / Col 31): `Worktag_Business_Unit_ID` / `OptionalBalancingWorktags_Business_Unit_ID`.

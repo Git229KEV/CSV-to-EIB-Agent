@@ -253,7 +253,7 @@ def resolve_target_file(requested=None):
             return cand
     return find_target_file("Import_Accounting_Journal_v45.1.template.xlsx")
 
-SPEND_MAPPING_FILE = "spend category.xlsx"
+SPEND_MAPPING_FILE = "spend category 1.xlsx"
 
 # Sheet names in target v45.1 workbook
 SHEET_HEADER = "Import Accounting Journal"
@@ -261,11 +261,13 @@ SHEET_LINES = "Journal Entry Line Replacement"
 
 def load_spend_category_map(mapping_file=None):
     """Loads ledger account -> spend category lookup dictionary from Excel.
-    Prefers 'spend category.xlsx' (154 accounts) with fallback to
-    'Spend Category Mapped Ledger Account.xlsx'.
+    Prefers 'spend category 1.xlsx' (155 accounts) with fallback to
+    'spend category.xlsx' (154 accounts) and 'Spend Category Mapped Ledger Account.xlsx'.
     """
     if mapping_file is None:
-        mapping_file = find_source_file("spend category.xlsx")
+        mapping_file = find_source_file("spend category 1.xlsx")
+        if not mapping_file or not os.path.exists(mapping_file):
+            mapping_file = find_source_file("spend category.xlsx")
         if not mapping_file or not os.path.exists(mapping_file):
             mapping_file = find_source_file("Spend Category Mapped Ledger Account.xlsx")
     spend_map = {}
@@ -1137,7 +1139,7 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
             ws_line.cell(row=line_row, column=22, value=parse_date(_pick_source_val(row, col_lookup, "budgetdate")))
             ws_line.cell(row=line_row, column=23, value=clean_val(_pick_source_val(row, col_lookup, "revenuecategory")))
 
-            # Map Spend Category using spend category.xlsx
+            # Map Spend Category using spend category 1.xlsx
             acct_key = str(acct_clean).strip() if acct_clean is not None else ""
             mapped_sc = spend_map.get(acct_key) or clean_val(_pick_source_val(row, col_lookup, "spendcategory"))
             ws_line.cell(row=line_row, column=25, value=mapped_sc)
@@ -1420,7 +1422,7 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         if cc_3digit is not None:
             cell_cc.number_format = "@"
 
-        # Col BE (57): Spend Category mapped from spend category.xlsx
+        # Col BE (57): Spend Category mapped from spend category 1.xlsx
         acct_key = str(acct_clean).strip() if acct_clean is not None else ""
         mapped_sc = spend_map.get(acct_key) or clean_val(_pick_source_val(row, col_lookup, "spendcategory"))
         ws.cell(row=curr_row, column=57, value=mapped_sc)
