@@ -4,10 +4,10 @@
 
 ### Enterprise Desktop Application & Automated Data Transformation Engine (`v45.1` – `v48.0`)
 
-[![Release](https://img.shields.io/badge/Release-v1.3.0-10b981?style=for-the-badge&logo=github)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/tag/v1.3.0)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20Desktop%20(.EXE)-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.3.0/WorkdayEIBStudio.exe)
+[![Release](https://img.shields.io/badge/Release-v1.4.0-10b981?style=for-the-badge&logo=github)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/tag/v1.4.0)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20Desktop%20(.EXE)-0ea5e9?style=for-the-badge&logo=windows)](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.4.0/WorkdayEIBStudio.exe)
 [![Workday EIB](https://img.shields.io/badge/Workday%20EIB-v45.1%20%7C%20v46.0%20%7C%20v47.0%20%7C%20v48.0-f59e0b?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
-[![Architecture](https://img.shields.io/badge/Engine-Native%20IPC%20%2B%20OpenPyXL-8b5cf6?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
+[![Architecture](https://img.shields.io/badge/Engine-Dual%20Engine%20(Local%20%2B%20Claude%20AI)-8b5cf6?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
 [![Balance Verification](https://img.shields.io/badge/Debit%2FCredit%20Variance-%240.00%20(100%25%20Balanced)-10b981?style=for-the-badge)](https://github.com/Git229KEV/CSV-to-EIB-Agent)
 
 <p align="center">
@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.3.0/WorkdayEIBStudio.exe"><strong>⬇ Download Standalone Windows Executable (WorkdayEIBStudio.exe — v1.3.0)</strong></a>
+  <a href="https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.4.0/WorkdayEIBStudio.exe"><strong>⬇ Download Standalone Windows Executable (WorkdayEIBStudio.exe — v1.4.0)</strong></a>
   &nbsp;•&nbsp;
   <a href="#-step-by-step-guide-how-to-upload--process-a-file"><strong>How to Upload & Process</strong></a>
   &nbsp;•&nbsp;
@@ -40,11 +40,18 @@
 
 ### Key Capabilities at a Glance
 - **Native Zero-Port Desktop Architecture**: Powered by `pywebview` (WinForms/WebView2) with direct JavaScript-to-Python IPC (`window.pywebview.api`). Requires **no local HTTP servers, no open ports, and no network configuration**.
-- **Multi-Template Workday EIB Support (`v45.1` to `v48.0`)**:
+- **Dual Transformation Engine (Local Rule Engine + Claude AI Agent)**:
+  - **Local Rule Engine (Deterministic)**: Ultra-fast offline ingestion engine powered by `_PandasLite` and `spend category 1.xlsx` (155 rules).
+  - **Claude AI Agent Engine (Autonomous)**: Anthropic Messages API agent guided by `skills/workday-eib-mapper/SKILL.md` supporting `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-opus-5-5`, and `claude-fable-5-2`. Provides semantic field mapping, accounting reasoning, multi-sheet aggregation, and automatic recovery.
+- **Top-Right Engine Selector & Ingestion Settings Modal**:
+  - Quick-switch header button (`#topEngineBtn`) with dynamic state (`cpu` vs `bot`), status dot, and one-click modal.
+  - Configure engine type, select Claude model, securely manage API key (with reveal toggle and `.gitignore` safety), and run live connectivity ping tests.
+- **Multi-Template Workday EIB Support (`v45.1` to `v48.0`) & Multi-Sheet Ingestion**:
   - **Two-Sheet Relational (`v45.1`)**: Populates `Import Accounting Journal` (Sheet 1 — Journal Headers) and `Journal Entry Line Replacement` (Sheet 2 — Journal Lines) linked via `Header Key`.
   - **Single-Sheet Unified (`v46.0`, `v47.0`, `v48.0`)**: Populates `Submit Accounting Journal` across 96 Workday metadata columns with dedicated 1:1 worktag columns.
+  - **EIB Workbook Extraction**: Detects Workday Row 5 `Fields` and joins multi-sheet EIB workbooks automatically.
 - **Automated Spend Category Lookup Engine**: Cross-references every line's `Ledger Account` against `spend category 1.xlsx` (155 ledger account rules) and injects the matching Workday `Spend Category` (`SC048`, `SC049`, `SC088`, `SC098`, `SC109`, `SC110`, etc.).
-- **100% Financial Balance & Data Hygiene Verification**: Automatically validates `Total Debits == Total Credits` (`$0.00` net variance), enforces strict blank handling on `NULL` memo cells, preserves explicit `0.0` amounts, and formats 3-digit Cost Centers (`000`, `070`, `090`, `200`) as Excel text `@`.
+- **100% Financial Balance & Data Hygiene Verification**: Automatically validates `Total Debits == Total Credits` (`$0.00` net variance), enforces strict blank handling on `NULL` memo cells, preserves explicit `0.0` amounts, completely strips underscores from Intercompany Affiliate (e.g. `LE_04` -> `LE04`), and formats 3-digit Cost Centers (`000`, `070`, `090`, `200`) as Excel text `@`.
 
 ---
 
@@ -229,7 +236,7 @@ The application window is organized into a **12-column split-grid workbench** wi
 
 | Component / Panel | UI Elements & Controls | Underlying Function & Behavior |
 | :--- | :--- | :--- |
-| **Top Native Titlebar** | • Application Identity Badge<br>• **`Explorer`** Quick Button<br>• **`Open Excel`** Quick Button<br>• **`Local Engine Active`** Pulse Indicator | Provides global one-click access to open the output folder in Windows File Explorer (`openOutputFolder()`) or open the most recently generated workbook in Microsoft Excel (`openInExcel()`). |
+| **Top Native Titlebar** | • Application Identity Badge<br>• **`Explorer`** Quick Button<br>• **`Open Excel`** Quick Button<br>• **Engine Selector Button (`#topEngineBtn`)**: Dynamic icon (`cpu`/`bot`), engine label (`Local Engine Active` vs `Claude AI Active`), and live pulse dot<br>• **Ingestion Engine Settings Modal (`#engineConfigModal`)**: Switch between Local Rule Engine and Claude AI Agent, select Claude model (`claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-opus-5-5`, `claude-fable-5-2`), manage API key with eye-toggle, run live connectivity Ping test, and view latest AI reasoning telemetry | Provides global one-click access to open the output folder in Windows File Explorer (`openOutputFolder()`), open the generated workbook in Microsoft Excel (`openInExcel()`), or configure the active transformation engine and Claude AI settings. |
 | **Panel `1`: Source Accounting File** | • Source File Input Box (`#sourcePathInput`) with placeholder `"Select or browse source accounting file(s) — single or bulk (max 12)..."`<br>• **`Browse File...`** & **`+ Add`** Multi-Select Buttons (`0 / 12 Queued` Badge)<br>• **Bulk Queue List** (`Clear All` & per-file remove) + **Auto-Schema Mapper Badge** | Opens the native Windows multi-file picker (`DesktopApi.select_file()`) for `.xlsx`, `.xls`, and `.csv` files (up to **12 files max** in bulk queue). Immediately inspects every uploaded file AND the active template (`DesktopApi.analyze_schema()`), detecting row/journal counts plus any new source/target columns automatically. |
 | **Panel `2`: Save Destination & Custom Output Filename** | • Destination Directory Path (`#saveLocationInput`)<br>• **`Browse Save Location...`** Button (`#btnBrowseFolder`)<br>• **Custom Output File Name / Optional Bulk Prefix Input** (`#outputFileNameInput`) | Lets the user pick any local or network folder via Windows Folder Browser (`DesktopApi.select_folder()`). In single-file mode, uses the exact custom filename (`.xlsx` auto-appended); in bulk mode, supports an optional prefix or auto-generates unique `<source>_<version>.xlsx` files. |
 | **Panel `3`: Target Workday EIB Template** | • 4 Interactive Template Cards:<br>&nbsp;&nbsp;1. **`v45.1`** (`Import_Accounting_Journal_v45.1.template.xlsx`)<br>&nbsp;&nbsp;2. **`v46.0`** (`Submit_Accounting_Journal_v46.0.xlsx`)<br>&nbsp;&nbsp;3. **`v47.0`** (`Submit_Accounting_Journal_v47.0.xlsx`)<br>&nbsp;&nbsp;4. **`v48.0`** (`Submit_Accounting_Journal_v48.0.xlsx`) | Dynamically switches the target Workday EIB architecture (`selectTemplate()`) and re-analyzes queued files against the selected template's Row 5 headers & Row 4 formats. |
@@ -245,7 +252,7 @@ The application window is organized into a **12-column split-grid workbench** wi
 ### Method A: Using the Enterprise Desktop Application (`WorkdayEIBStudio.exe`)
 
 > [!TIP]
-> **No Python installation is required** to run the standalone executable. Download [`WorkdayEIBStudio.exe`](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.3.0/WorkdayEIBStudio.exe) from the [**Releases**](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases) page and double-click it to launch.
+> **No Python installation is required** to run the standalone executable. Download [`WorkdayEIBStudio.exe`](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases/download/v1.4.0/WorkdayEIBStudio.exe) from the [**Releases**](https://github.com/Git229KEV/CSV-to-EIB-Agent/releases) page and double-click it to launch.
 
 #### Step 1 — Browse & Upload Your Source Accounting File(s) (Panel 1 — Single or Bulk Max 12)
 1. Next to the `"Select or browse source accounting file(s) — single or bulk (max 12)..."` input box in **Panel 1 (`Source Accounting File`)**, click **`Browse File...`**.
@@ -398,12 +405,17 @@ For single-sheet Workday EIB templates, header and line fields are combined onto
 CSV-to-EIB-Agent/
 ├── desktop_app.py                            # Native Windows Desktop Studio (pywebview + DesktopApi IPC bridge)
 ├── run_agent.py                              # Core Workday EIB Ingestion Engine (_PandasLite + Two-Sheet & Single-Sheet mappers)
+├── claude_agent.py                           # Claude AI Agent Mapping Engine (Anthropic Messages API + Skills)
+├── test_claude_integration.py                # Comprehensive test suite for Claude AI integration
 ├── WorkdayEIBStudio.spec                     # PyInstaller specification for building standalone WorkdayEIBStudio.exe
 ├── test_app_playwright.py                    # End-to-End Playwright verification suite (UI + openpyxl cell assertions)
 ├── mapping_import_accounting_journal.json    # JSON schema reference for v45.1 Two-Sheet mapping
 ├── mapping_submit_accounting_journal.json    # JSON schema reference for v46.0–v48.0 Single-Sheet mapping
 ├── HOW_IT_WORKS.md                           # Architecture & transformation workflow documentation
 ├── agent.md                                  # Agent specification & field mapping rules
+├── skills/
+│   └── workday-eib-mapper/
+│       └── SKILL.md                          # Workday EIB domain knowledge & accounting prompt skill
 ├── Workday_EIB_Project_Overview.pdf          # Executive project overview document
 ├── Workday_EIB_Studio_User_Guide.pdf         # Comprehensive visual user guide (PDF)
 ├── playwright_desktop_app_verification.png   # Verified screenshot of the Enterprise Desktop Studio

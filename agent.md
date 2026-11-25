@@ -62,3 +62,13 @@ Rows 1–5 are metadata and header rows. Data rows start at Row 6.
 - **Intercompany Affiliate** (`Col AC` / Col 29): Auto-detected across Workday & ERP column variants (`Worktag_Intercompany_Affiliate_ID`, `IntercompanyAffiliate`, `Intercompany Affiliate`, `Affliate Company`, `Affiliate Company`, `Affiliate`, `TradingPartner`, etc.; blank if absent in source). Underscores are completely stripped from all mapped Intercompany Affiliate values with no spaces added (e.g., `'LE_04'` -> `'LE04'`).
 - **Balancing Worktag Affiliate** (`Col AE` / Col 31): `Worktag_Business_Unit_ID` / `OptionalBalancingWorktags_Business_Unit_ID`.
 - **Dynamic Auto-Discovery & Bulk Processing (Max 12 Files)**: Automatically inspects both source headers and target template columns (Row 5 + Row 4) to map newly introduced columns (e.g. `Supplier`, `Customer`, `Book Code`, `Document Link`, `Exclude from Spend Report`, `Project`, etc.), and supports bulk processing of up to **12 files** per batch.
+
+---
+
+## 4. Claude AI Agent Mapping Engine (`v1.4.0`)
+Starting with `v1.4.0`, the system embeds the **Claude AI Agent** alongside the local deterministic engine.
+- **Anthropic API Integration**: Defined in `claude_agent.py` and invoked via `run_agent.py` or the Desktop UI.
+- **Supported Claude Models**: `claude-sonnet-5-5` (default), `claude-haiku-5-5`, `claude-opus-5-5`, and `claude-fable-5-2`.
+- **Domain Skill**: Loaded from `skills/workday-eib-mapper/SKILL.md` to provide Workday EIB accounting semantics, schema layouts, and strict data hygiene rules.
+- **Multi-Sheet & EIB Ingestion**: Intelligently handles raw flat CSVs/Excel sheets as well as existing multi-sheet EIB files, automatically joining journal headers and lines.
+- **Security & Privacy**: Anthropic API keys are stored exclusively on local disk in `claude_config.json` and excluded from git version control.

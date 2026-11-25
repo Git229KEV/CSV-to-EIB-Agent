@@ -9,18 +9,24 @@ import datetime
 import shutil
 import openpyxl
 
+from claude_agent import get_claude_agent, ClaudeAgent
+
 MAX_BULK_FILES = 12
 
 class _IlocIndexer:
-    def __init__(self, rows):
+    def __init__(self, parent_df, rows):
+        self._parent = parent_df
         self._rows = rows
     def __getitem__(self, idx):
-        return self._rows[idx]
+        res = self._rows[idx]
+        if isinstance(res, list):
+            return _LightweightDataFrame(res, columns=self._parent.columns)
+        return res
 
 class _LightweightDataFrame:
     def __init__(self, rows, columns=None):
         self._rows = rows
-        self.iloc = _IlocIndexer(rows)
+        self.iloc = _IlocIndexer(self, rows)
         if columns is not None:
             self.columns = list(columns)
         elif rows:
@@ -32,6 +38,28 @@ class _LightweightDataFrame:
     def iterrows(self):
         for idx, r in enumerate(self._rows):
             yield idx, r
+
+def _extract_sample_rows(df, n=3):
+    if df is None or len(df) == 0:
+        return []
+    if hasattr(df, "_rows"):
+        return [dict(r) for r in df._rows[:n]]
+    try:
+        if hasattr(df, "iloc"):
+            sliced = df.iloc[:n]
+            if hasattr(sliced, "iterrows"):
+                return [dict(r) for _, r in sliced.iterrows()]
+            if isinstance(sliced, list):
+                return [dict(r) for r in sliced]
+    except Exception:
+        pass
+    sample = []
+    if hasattr(df, "iterrows"):
+        for _, r in df.iterrows():
+            sample.append(dict(r))
+            if len(sample) >= n:
+                break
+    return sample
 
 def _parse_csv_val(v):
     if v is None:
@@ -63,23 +91,60 @@ class _PandasLite:
 
     @staticmethod
     def _extract_excel_sheet(ws):
-        rows_iter = ws.iter_rows(values_only=True)
-        header_row = None
-        # Look in rows 1..10 for the real header row (Row 1 works immediately for standard files)
-        for _ in range(10):
-            cand = next(rows_iter, None)
-            if cand is None:
-                break
-            non_empty = [v for v in cand if v is not None and str(v).strip() != ""]
-            if len(non_empty) >= 2:
-                header_row = cand
-                break
-        if not header_row:
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
             return [], []
-        headers = [str(h).strip() if h is not None else f"Unnamed: {i}" for i, h in enumerate(header_row)]
+
+        # 1. Check if this is a Workday EIB sheet with 'Fields' in Col A (Row 5)
+        # or where a row explicitly contains 'Header Key' or 'Spreadsheet Key'
+        fields_row_idx = None
+        for idx, r in enumerate(rows[:10]):
+            if not r:
+                continue
+            c0 = str(r[0]).strip().lower() if r[0] is not None else ""
+            if c0 in ("fields", "field"):
+                fields_row_idx = idx
+                break
+            if any(v and ("header key" in str(v).lower() or "spreadsheet key" in str(v).lower()) for v in r):
+                fields_row_idx = idx
+                break
+
+        if fields_row_idx is not None:
+            header_row = rows[fields_row_idx]
+            data_rows = rows[fields_row_idx + 1:]
+        else:
+            # 2. Standard sheet: search for first row with >= 2 non-empty cells that is not an Area/Restrictions/Format row
+            header_row = None
+            data_rows = []
+            for idx, r in enumerate(rows[:10]):
+                if not r:
+                    continue
+                c0 = str(r[0]).strip().lower() if r[0] is not None else ""
+                if c0 in ("area", "restrictions", "format"):
+                    continue
+                non_empty = [v for v in r if v is not None and str(v).strip() != ""]
+                if len(non_empty) >= 2:
+                    header_row = r
+                    data_rows = rows[idx + 1:]
+                    break
+            if not header_row:
+                header_row = rows[0]
+                data_rows = rows[1:]
+
+        headers = []
+        seen = {}
+        for i, h in enumerate(header_row):
+            val = str(h).strip().rstrip("*+") if h is not None and str(h).strip() != "" else f"Col_{i+1}"
+            if val in seen:
+                seen[val] += 1
+                val = f"{val}_{seen[val]}"
+            else:
+                seen[val] = 1
+            headers.append(val)
+
         records = []
-        for r in rows_iter:
-            if r is None or all(v is None or (isinstance(v, str) and v.strip() == "") for v in r):
+        for r in data_rows:
+            if not r or all(v is None or (isinstance(v, str) and v.strip() == "") for v in r):
                 continue
             row_dict = {}
             for i, h in enumerate(headers):
@@ -91,12 +156,44 @@ class _PandasLite:
         return records, headers
 
     @staticmethod
-    def read_excel(path):
+    def read_excel(path, *args, **kwargs):
         wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        snames = wb.sheetnames
+
+        # Case 1: Two-sheet Workday EIB (has 'Journal Entry Line Replacement' and optionally 'Import Accounting Journal')
+        if "Journal Entry Line Replacement" in snames:
+            line_records, line_headers = _PandasLite._extract_excel_sheet(wb["Journal Entry Line Replacement"])
+            all_headers = list(line_headers)
+            if "Import Accounting Journal" in snames:
+                hdr_records, hdr_headers = _PandasLite._extract_excel_sheet(wb["Import Accounting Journal"])
+                hdr_map = {}
+                for hr in hdr_records:
+                    k = hr.get("Header Key") or hr.get("HeaderKey") or hr.get("Header Key*")
+                    if k is not None:
+                        hdr_map[str(k).strip()] = hr
+                for lr in line_records:
+                    k = lr.get("Header Key") or lr.get("HeaderKey")
+                    matching_hr = hdr_map.get(str(k).strip()) if k is not None else (hdr_records[0] if len(hdr_records) == 1 else None)
+                    if matching_hr:
+                        for hk, hv in matching_hr.items():
+                            if hk not in lr or lr[hk] is None:
+                                lr[hk] = hv
+                            if hk not in all_headers:
+                                all_headers.append(hk)
+            wb.close()
+            return _LightweightDataFrame(line_records, columns=all_headers)
+
+        # Case 2: Single-sheet Workday EIB (has 'Submit Accounting Journal')
+        if "Submit Accounting Journal" in snames:
+            records, headers = _PandasLite._extract_excel_sheet(wb["Submit Accounting Journal"])
+            wb.close()
+            return _LightweightDataFrame(records, columns=headers)
+
+        # Case 3: Standard active sheet or best populated sheet
         ws = wb.active
         records, headers = _PandasLite._extract_excel_sheet(ws)
-        if not records and len(wb.sheetnames) > 1:
-            for sname in wb.sheetnames:
+        if not records and len(snames) > 1:
+            for sname in snames:
                 cand_records, cand_headers = _PandasLite._extract_excel_sheet(wb[sname])
                 if len(cand_headers) >= 2 and (cand_records or not headers):
                     records, headers = cand_records, cand_headers
@@ -793,8 +890,24 @@ def _resolve_handled_src(col_lookup, keys):
         for c in [_resolve_source_column(col_lookup, _CORE_SOURCE_ALIASES[k])] if c
     }
 
-def _plan_two_sheet_mappings(source_cols, ws_hdr, ws_line, col_lookup):
+def _plan_two_sheet_mappings(source_cols, ws_hdr, ws_line, col_lookup, claude_plan=None):
     """Builds shared dynamic mapping plan for two-sheet v45.1 workbooks."""
+    # Apply Claude core mappings if available
+    if claude_plan and isinstance(claude_plan, dict):
+        core = claude_plan.get("core_mappings", {})
+        if core.get("intercompany_affiliate"):
+            cand = core["intercompany_affiliate"]
+            if cand in source_cols:
+                col_lookup["exact"]["intercompanyaffiliate"] = cand
+                col_lookup["norm"][_norm_token("intercompanyaffiliate")] = cand
+                col_lookup["exact"][cand] = cand
+                col_lookup["norm"][_norm_token(cand)] = cand
+        if core.get("cost_center"):
+            cand = core["cost_center"]
+            if cand in source_cols:
+                col_lookup["exact"]["costcenter"] = cand
+                col_lookup["norm"][_norm_token("costcenter")] = cand
+
     line_hdr_cols = {
         str(ws_line.cell(row=5, column=c).value).strip().rstrip("*+"): c
         for c in range(1, ws_line.max_column + 1)
@@ -822,10 +935,90 @@ def _plan_two_sheet_mappings(source_cols, ws_hdr, ws_line, col_lookup):
         "intercompanyaffiliate", "balancingworktagaffiliate"
     ))
     line_auto = discover_sheet_mappings(source_cols, ws_line, handled_line_tgt, handled_line_src, is_header_sheet=False)
+
+    # Merge Claude auto-discovered mappings if present
+    if claude_plan and isinstance(claude_plan, dict):
+        claude_autos = claude_plan.get("auto_discovered_mappings", [])
+        existing_targets = {m["target_col_idx"] for m in (hdr_auto + line_auto)}
+        existing_sources = {m["source_col"] for m in (hdr_auto + line_auto)} | handled_line_src | handled_hdr_src
+        all_line_tcs = _inspect_target_sheet(ws_line)
+        all_hdr_tcs = _inspect_target_sheet(ws_hdr)
+
+        def _resolve_candidate_tc(tc_list, ca_dict):
+            c_idx = ca_dict.get("target_col_idx")
+            c_let = ca_dict.get("target_col_letter")
+            h_name = ca_dict.get("target_header")
+            for tc in tc_list:
+                if c_idx and tc["col_idx"] == c_idx:
+                    return tc
+                if c_let and tc["col_letter"].upper() == str(c_let).strip().upper():
+                    return tc
+                if h_name:
+                    hn_norm = _norm_token(h_name)
+                    if hn_norm and (hn_norm == tc["norm"] or hn_norm in tc["norm"]):
+                        return tc
+                    if str(h_name).strip().lower() == tc["header"].strip().lower():
+                        return tc
+            return None
+
+        for ca in claude_autos:
+            src_col = ca.get("source_col")
+            if not src_col or src_col not in source_cols or src_col in existing_sources:
+                continue
+            tgt_sheet = ca.get("target_sheet", SHEET_LINES)
+
+            if SHEET_HEADER.lower() in tgt_sheet.lower():
+                tc = _resolve_candidate_tc(all_hdr_tcs, ca)
+                if tc and tc["col_idx"] not in existing_targets:
+                    hdr_auto.append({
+                        "source_col": src_col,
+                        "target_sheet": SHEET_HEADER,
+                        "target_col_idx": tc["col_idx"],
+                        "target_col_letter": tc["col_letter"],
+                        "target_header": tc["header"],
+                        "target_format": tc["format"],
+                        "match_method": f"claude_ai ({claude_plan.get('model', 'Claude AI')})",
+                        "confidence": ca.get("confidence", 0.95),
+                        "reasoning": ca.get("reasoning", "Claude AI Agent semantic mapping"),
+                    })
+                    existing_targets.add(tc["col_idx"])
+                    existing_sources.add(src_col)
+            else:
+                tc = _resolve_candidate_tc(all_line_tcs, ca)
+                if tc and tc["col_idx"] not in existing_targets:
+                    line_auto.append({
+                        "source_col": src_col,
+                        "target_sheet": SHEET_LINES,
+                        "target_col_idx": tc["col_idx"],
+                        "target_col_letter": tc["col_letter"],
+                        "target_header": tc["header"],
+                        "target_format": tc["format"],
+                        "match_method": f"claude_ai ({claude_plan.get('model', 'Claude AI')})",
+                        "confidence": ca.get("confidence", 0.95),
+                        "reasoning": ca.get("reasoning", "Claude AI Agent semantic mapping"),
+                    })
+                    existing_targets.add(tc["col_idx"])
+                    existing_sources.add(src_col)
+
     return col_intercompany, col_balancing_affiliate, hdr_auto, line_auto
 
-def _plan_single_sheet_mappings(source_cols, ws, col_lookup):
+def _plan_single_sheet_mappings(source_cols, ws, col_lookup, claude_plan=None):
     """Builds shared dynamic mapping plan for single-sheet v46/v47/v48 workbooks."""
+    if claude_plan and isinstance(claude_plan, dict):
+        core = claude_plan.get("core_mappings", {})
+        if core.get("intercompany_affiliate"):
+            cand = core["intercompany_affiliate"]
+            if cand in source_cols:
+                col_lookup["exact"]["intercompanyaffiliate"] = cand
+                col_lookup["norm"][_norm_token("intercompanyaffiliate")] = cand
+                col_lookup["exact"][cand] = cand
+                col_lookup["norm"][_norm_token(cand)] = cand
+        if core.get("cost_center"):
+            cand = core["cost_center"]
+            if cand in source_cols:
+                col_lookup["exact"]["costcenter"] = cand
+                col_lookup["norm"][_norm_token("costcenter")] = cand
+
     handled_tgt = {2, 3, 4, 5, 8, 9, 13, 15, 16, 17, 18, 19, 20, 24, 25, 26, 35, 36, 37, 38, 39, 42, 43, 44, 52, 53, 54, 55, 57, 59, 61, 63, 65}
     handled_src = _resolve_handled_src(col_lookup, (
         "headerkey", "addonly", "journalkey", "submit", "journalnumber", "company", "currency",
@@ -835,9 +1028,39 @@ def _plan_single_sheet_mappings(source_cols, ws, col_lookup):
         "costcenter", "spendcategory", "balancingworktagaffiliate", "customorganization",
         "customworktag1", "revenuecategory"
     ))
-    return discover_sheet_mappings(source_cols, ws, handled_tgt, handled_src, is_header_sheet=False)
+    auto_mappings = discover_sheet_mappings(source_cols, ws, handled_tgt, handled_src, is_header_sheet=False)
 
-def analyze_schema(source_file, excel_template=None):
+    if claude_plan and isinstance(claude_plan, dict):
+        claude_autos = claude_plan.get("auto_discovered_mappings", [])
+        existing_targets = {m["target_col_idx"] for m in auto_mappings} | handled_tgt
+        existing_sources = {m["source_col"] for m in auto_mappings} | handled_src
+        target_cols = {tc["header"].lower(): tc for tc in _inspect_target_sheet(ws)}
+
+        for ca in claude_autos:
+            src_col = ca.get("source_col")
+            if not src_col or src_col not in source_cols or src_col in existing_sources:
+                continue
+            tgt_hdr_name = (ca.get("target_header") or "").strip().lower()
+            if tgt_hdr_name in target_cols:
+                tc = target_cols[tgt_hdr_name]
+                if tc["col_idx"] not in existing_targets:
+                    auto_mappings.append({
+                        "source_col": src_col,
+                        "target_sheet": ws.title,
+                        "target_col_idx": tc["col_idx"],
+                        "target_col_letter": tc["col_letter"],
+                        "target_header": tc["header"],
+                        "target_format": tc["format"],
+                        "match_method": f"claude_ai ({claude_plan.get('model', 'Claude AI')})",
+                        "confidence": ca.get("confidence", 0.95),
+                        "reasoning": ca.get("reasoning", "Claude AI Agent semantic mapping"),
+                    })
+                    existing_targets.add(tc["col_idx"])
+                    existing_sources.add(src_col)
+
+    return auto_mappings
+
+def analyze_schema(source_file, excel_template=None, use_claude=False, claude_api_key=None, claude_model=None):
     """Inspects both source columns and target template columns and returns mapping discovery summary."""
     resolved_src = find_source_file(source_file)
     if not resolved_src or not os.path.exists(resolved_src):
@@ -856,6 +1079,34 @@ def analyze_schema(source_file, excel_template=None):
     is_two_sheet = (SHEET_HEADER in wb.sheetnames and SHEET_LINES in wb.sheetnames)
     col_lookup = _build_col_lookup(source_cols)
 
+    claude_res = None
+    if use_claude:
+        try:
+            agent = get_claude_agent()
+            if claude_api_key or claude_model:
+                agent.set_config(api_key=claude_api_key, model=claude_model)
+            if agent.is_available():
+                sample_rows = _extract_sample_rows(df, 3)
+                if is_two_sheet:
+                    tpl_summary = {
+                        "is_two_sheet": True,
+                        "header_sheet": [{"col": tc["col_letter"], "header": tc["header"], "format": tc["format"]} for tc in _inspect_target_sheet(wb[SHEET_HEADER])],
+                        "lines_sheet": [{"col": tc["col_letter"], "header": tc["header"], "format": tc["format"]} for tc in _inspect_target_sheet(wb[SHEET_LINES])],
+                    }
+                else:
+                    sheet_name = "Submit Accounting Journal" if "Submit Accounting Journal" in wb.sheetnames else wb.sheetnames[0]
+                    tpl_summary = {
+                        "is_two_sheet": False,
+                        "sheet": [{"col": tc["col_letter"], "header": tc["header"], "format": tc["format"]} for tc in _inspect_target_sheet(wb[sheet_name])],
+                    }
+                claude_res = agent.analyze_and_map(source_cols, sample_rows, tpl_summary)
+                if claude_res.get("success"):
+                    print(f"[Claude AI Agent] Skill loaded: {agent.skill_source}")
+                    print(f"[Claude AI Agent] Model: {claude_res.get('model')}")
+                    print(f"[Claude AI Agent] Reasoning: {claude_res.get('reasoning_summary')}")
+        except Exception as e:
+            print(f"[Claude AI Agent] Schema analysis fallback: {e}")
+
     auto_mappings = []
     target_col_summary = {}
 
@@ -864,14 +1115,14 @@ def analyze_schema(source_file, excel_template=None):
         ws_line = wb[SHEET_LINES]
         target_col_summary[SHEET_HEADER] = ws_hdr.max_column
         target_col_summary[SHEET_LINES] = ws_line.max_column
-        _, _, hdr_auto, line_auto = _plan_two_sheet_mappings(source_cols, ws_hdr, ws_line, col_lookup)
+        _, _, hdr_auto, line_auto = _plan_two_sheet_mappings(source_cols, ws_hdr, ws_line, col_lookup, claude_plan=claude_res)
         auto_mappings.extend(hdr_auto)
         auto_mappings.extend(line_auto)
     else:
         sheet_name = "Submit Accounting Journal" if "Submit Accounting Journal" in wb.sheetnames else wb.sheetnames[0]
         ws = wb[sheet_name]
         target_col_summary[sheet_name] = ws.max_column
-        auto_mappings.extend(_plan_single_sheet_mappings(source_cols, ws, col_lookup))
+        auto_mappings.extend(_plan_single_sheet_mappings(source_cols, ws, col_lookup, claude_plan=claude_res))
 
     wb.close()
 
@@ -898,6 +1149,7 @@ def analyze_schema(source_file, excel_template=None):
         "intercompany_source_col": interco_src,
         "auto_discovered_mappings": auto_mappings,
         "unmapped_populated_columns": unmapped_populated,
+        "claude_ai": claude_res,
     }
 
 def select_file_interactive(prompt_title, options, default_index=0):
@@ -962,7 +1214,7 @@ def _safe_int_or_val(val, fallback):
         return int(s)
     return s or fallback
 
-def process_journal_2026(source_file, excel_template, output_file=None, output_dir=None):
+def process_journal_2026(source_file, excel_template, output_file=None, output_dir=None, use_claude=False, claude_api_key=None, claude_model=None):
     # Load Spend Category lookup map
     spend_map = load_spend_category_map()
 
@@ -1007,9 +1259,30 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
             print(f"Clearing Sheet '{SHEET_LINES}' data rows 6 to {ws_line.max_row}...")
             ws_line.delete_rows(6, ws_line.max_row - 5)
 
+        claude_res = None
+        if use_claude:
+            try:
+                agent = get_claude_agent()
+                if claude_api_key or claude_model:
+                    agent.set_config(api_key=claude_api_key, model=claude_model)
+                if agent.is_available():
+                    sample_rows = _extract_sample_rows(df, 3)
+                    tpl_summary = {
+                        "is_two_sheet": True,
+                        "header_sheet": [{"col": tc["col_letter"], "header": tc["header"], "format": tc["format"]} for tc in _inspect_target_sheet(ws_hdr)],
+                        "lines_sheet": [{"col": tc["col_letter"], "header": tc["header"], "format": tc["format"]} for tc in _inspect_target_sheet(ws_line)],
+                    }
+                    claude_res = agent.analyze_and_map(source_cols, sample_rows, tpl_summary)
+                    if claude_res.get("success"):
+                        print(f"\n[Claude AI Agent] Domain Skill Active: {agent.skill_source}")
+                        print(f"[Claude AI Agent] Model: {claude_res.get('model')}")
+                        print(f"[Claude AI Agent] Reasoning: {claude_res.get('reasoning_summary')}\n")
+            except Exception as e:
+                print(f"[Claude AI Agent] Ingestion notice: {e}. Falling back to rule engine.")
+
         # Resolve Header & Line column maps dynamically from Row 5 headers & auto-discover extra columns
         col_intercompany, col_balancing_affiliate, hdr_auto_mappings, line_auto_mappings = _plan_two_sheet_mappings(
-            source_cols, ws_hdr, ws_line, col_lookup
+            source_cols, ws_hdr, ws_line, col_lookup, claude_plan=claude_res
         )
         all_auto_mappings = hdr_auto_mappings + line_auto_mappings
 
@@ -1229,22 +1502,23 @@ def process_journal_2026(source_file, excel_template, output_file=None, output_d
         "total_credit": round(total_credits, 2),
         "variance": variance,
         "is_balanced": variance == 0,
-        "output_file": output_file
+        "output_file": output_file,
+        "claude_ai": claude_res,
     }
 
 # ==============================================================================
 # CODE FOR 2025 MAPPING (UNIFIED WITH 2026 TWO-SHEET V45.1 MAPPING LOGIC)
 # ==============================================================================
-def process_journal_2025(source_file, excel_template, output_file=None, output_dir=None):
+def process_journal_2025(source_file, excel_template, output_file=None, output_dir=None, use_claude=False, claude_api_key=None, claude_model=None):
     """
     Uses the exact same two-sheet Import Accounting Journal (v45.1) mapping logic as 2026.
     """
-    return process_journal_2026(source_file, excel_template, output_file=output_file, output_dir=output_dir)
+    return process_journal_2026(source_file, excel_template, output_file=output_file, output_dir=output_dir, use_claude=use_claude, claude_api_key=claude_api_key, claude_model=claude_model)
 
 # ==============================================================================
 # CODE FOR SINGLE-SHEET TEMPLATES (v46.0, v47.0, v48.0)
 # ==============================================================================
-def process_journal_single_sheet(source_file, excel_template, output_file=None, output_dir=None):
+def process_journal_single_sheet(source_file, excel_template, output_file=None, output_dir=None, use_claude=False, claude_api_key=None, claude_model=None):
     """Maps source journal entries into a Workday Submit Accounting Journal single-sheet template (v46, v47, v48)."""
     spend_map = load_spend_category_map()
 
@@ -1281,8 +1555,28 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         print(f"Clearing Sheet '{sheet_name}' data rows 6 to {ws.max_row}...")
         ws.delete_rows(6, ws.max_row - 5)
 
+    claude_res = None
+    if use_claude:
+        try:
+            agent = get_claude_agent()
+            if claude_api_key or claude_model:
+                agent.set_config(api_key=claude_api_key, model=claude_model)
+            if agent.is_available():
+                sample_rows = _extract_sample_rows(df, 3)
+                tpl_summary = {
+                    "is_two_sheet": False,
+                    "sheet": [{"col": tc["col_letter"], "header": tc["header"], "format": tc["format"]} for tc in _inspect_target_sheet(ws)],
+                }
+                claude_res = agent.analyze_and_map(source_cols, sample_rows, tpl_summary)
+                if claude_res.get("success"):
+                    print(f"\n[Claude AI Agent] Domain Skill Active: {agent.skill_source}")
+                    print(f"[Claude AI Agent] Model: {claude_res.get('model')}")
+                    print(f"[Claude AI Agent] Reasoning: {claude_res.get('reasoning_summary')}\n")
+        except Exception as e:
+            print(f"[Claude AI Agent] Ingestion notice: {e}. Falling back to rule engine.")
+
     # Auto-discover any extra/new source or target columns beyond the core single-sheet positions
-    auto_mappings = _plan_single_sheet_mappings(source_cols, ws, col_lookup)
+    auto_mappings = _plan_single_sheet_mappings(source_cols, ws, col_lookup, claude_plan=claude_res)
     if auto_mappings:
         print(f"Auto-Discovered {len(auto_mappings)} Additional Column Mapping(s):")
         for am in auto_mappings:
@@ -1496,7 +1790,8 @@ def process_journal_single_sheet(source_file, excel_template, output_file=None, 
         "total_credit": round(total_credits, 2),
         "variance": variance,
         "is_balanced": variance == 0,
-        "output_file": output_file
+        "output_file": output_file,
+        "claude_ai": claude_res,
     }
 
 # ==============================================================================
@@ -1512,7 +1807,7 @@ def resolve_template_path(template_name):
             return find_target_file(tpl["filename"])
     return find_target_file(req)
 
-def process_journal(source_file=None, excel_template=None, output_file=None, output_dir=None):
+def process_journal(source_file=None, excel_template=None, output_file=None, output_dir=None, use_claude=False, claude_api_key=None, claude_model=None):
     if excel_template is None:
         excel_template = find_target_file("Import_Accounting_Journal_v45.1.template.xlsx")
     else:
@@ -1528,8 +1823,8 @@ def process_journal(source_file=None, excel_template=None, output_file=None, out
         if not os.path.exists(src_2025):
             src_2025 = find_source_file("Accounting_Journal_RawAgg_01_202501.xlsx")
 
-        res_2026 = process_journal(source_file=src_2026, excel_template=excel_template, output_dir=output_dir)
-        res_2025 = process_journal(source_file=src_2025, excel_template=excel_template, output_dir=output_dir)
+        res_2026 = process_journal(source_file=src_2026, excel_template=excel_template, output_dir=output_dir, use_claude=use_claude, claude_api_key=claude_api_key, claude_model=claude_model)
+        res_2025 = process_journal(source_file=src_2025, excel_template=excel_template, output_dir=output_dir, use_claude=use_claude, claude_api_key=claude_api_key, claude_model=claude_model)
         return {"2026": res_2026, "2025": res_2025}
 
     resolved_source = find_source_file(source_file)
@@ -1548,13 +1843,13 @@ def process_journal(source_file=None, excel_template=None, output_file=None, out
 
     if is_two_sheet:
         if "2025" in str(resolved_source):
-            return process_journal_2025(resolved_source, excel_template, output_file, output_dir=output_dir)
+            return process_journal_2025(resolved_source, excel_template, output_file, output_dir=output_dir, use_claude=use_claude, claude_api_key=claude_api_key, claude_model=claude_model)
         else:
-            return process_journal_2026(resolved_source, excel_template, output_file, output_dir=output_dir)
+            return process_journal_2026(resolved_source, excel_template, output_file, output_dir=output_dir, use_claude=use_claude, claude_api_key=claude_api_key, claude_model=claude_model)
     else:
-        return process_journal_single_sheet(resolved_source, excel_template, output_file, output_dir=output_dir)
+        return process_journal_single_sheet(resolved_source, excel_template, output_file, output_dir=output_dir, use_claude=use_claude, claude_api_key=claude_api_key, claude_model=claude_model)
 
-def process_bulk(source_files, excel_template=None, output_dir=None, output_prefix=None):
+def process_bulk(source_files, excel_template=None, output_dir=None, output_prefix=None, use_claude=False, claude_api_key=None, claude_model=None):
     """Processes up to 12 source files sequentially into the selected Workday EIB template."""
     if not source_files:
         raise ValueError("No source files provided for bulk processing.")
@@ -1590,7 +1885,7 @@ def process_bulk(source_files, excel_template=None, output_dir=None, output_pref
         out_path = os.path.join(out_dir, candidate_name)
 
         try:
-            res = process_journal(source_file=src, excel_template=tpl_path, output_file=out_path, output_dir=out_dir)
+            res = process_journal(source_file=src, excel_template=tpl_path, output_file=out_path, output_dir=out_dir, use_claude=use_claude, claude_api_key=claude_api_key, claude_model=claude_model)
             results.append(res)
             total_lines += res.get("total_lines_written", 0)
             total_debits += float(res.get("total_debit", 0.0))
@@ -1628,21 +1923,24 @@ def main():
     parser.add_argument("--bulk", "-b", nargs="+", help=f"Bulk process up to {MAX_BULK_FILES} source files", default=None)
     parser.add_argument("--output-dir", "-o", help="Destination folder for output files", default=None)
     parser.add_argument("--analyze", action="store_true", help="Analyze source and target schemas without generating files")
+    parser.add_argument("--claude", "--ai", action="store_true", help="Enable Claude AI Agent mapping")
+    parser.add_argument("--api-key", help="Anthropic / Claude API Key", default=None)
+    parser.add_argument("--model", help="Claude model name", default=None)
     args = parser.parse_args()
 
     if args.analyze and args.source:
         import json
-        report = analyze_schema(args.source, args.target)
+        report = analyze_schema(args.source, args.target, use_claude=args.claude, claude_api_key=args.api_key, claude_model=args.model)
         print(json.dumps(report, indent=2, default=str))
         return
 
     if args.bulk:
-        summary = process_bulk(args.bulk, excel_template=args.target, output_dir=args.output_dir)
+        summary = process_bulk(args.bulk, excel_template=args.target, output_dir=args.output_dir, use_claude=args.claude, claude_api_key=args.api_key, claude_model=args.model)
         print(f"\n[BULK SUMMARY] {summary['succeeded']}/{summary['total_files']} files processed -> {summary['output_dir']}")
         return
 
     if args.all:
-        process_journal(source_file="all", excel_template=args.target, output_dir=args.output_dir)
+        process_journal(source_file="all", excel_template=args.target, output_dir=args.output_dir, use_claude=args.claude, claude_api_key=args.api_key, claude_model=args.model)
         return
 
     # Discover available files in source and target directories as well as root
@@ -1674,7 +1972,7 @@ def main():
         )
 
     if "both" in chosen_source.lower() or "all" in chosen_source.lower():
-        process_journal(source_file="all", excel_template=args.target, output_dir=args.output_dir)
+        process_journal(source_file="all", excel_template=args.target, output_dir=args.output_dir, use_claude=args.claude, claude_api_key=args.api_key, claude_model=args.model)
         return
 
     # 2. Ask user where to map the data (show base template name)
@@ -1688,7 +1986,7 @@ def main():
         )
 
     # 3. Execute mapping individually via dispatcher
-    process_journal(source_file=chosen_source, excel_template=chosen_target, output_dir=args.output_dir)
+    process_journal(source_file=chosen_source, excel_template=chosen_target, output_dir=args.output_dir, use_claude=args.claude, claude_api_key=args.api_key, claude_model=args.model)
 
 if __name__ == "__main__":
     main()

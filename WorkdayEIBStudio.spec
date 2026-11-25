@@ -9,6 +9,7 @@ added_files = [
     ('frontend', 'frontend'),
     ('source', 'source'),
     ('target', 'target'),
+    ('skills', 'skills'),
     ('spend category 1.xlsx', '.'),
     ('spend category.xlsx', '.'),
     ('mapping_import_accounting_journal.json', '.'),
@@ -31,7 +32,11 @@ a = Analysis(
         'csv',
         'math',
         'datetime',
-        'shutil'
+        'shutil',
+        'claude_agent',
+        'json',
+        'urllib.request',
+        'urllib.error'
     ],
     hookspath=[],
     hooksconfig={},

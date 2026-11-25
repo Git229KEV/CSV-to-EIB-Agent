@@ -30,6 +30,7 @@ from run_agent import (
     TARGET_TEMPLATES,
     MAX_BULK_FILES
 )
+from claude_agent import get_claude_agent
 
 class DesktopApi:
     """Native Python API bridge callable directly from frontend JavaScript in desktop environment."""
@@ -42,7 +43,33 @@ class DesktopApi:
     def is_desktop(self):
         return True
 
-    def inspect_source_file(self, filepath, target_template="v45"):
+    def get_claude_status(self):
+        """Returns Claude AI Agent configuration, model, and domain skill status."""
+        try:
+            agent = get_claude_agent()
+            status = agent.get_status()
+            return {"success": True, **status}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def set_claude_config(self, api_key=None, model=None):
+        """Saves Claude AI Agent credentials and model locally in claude_config.json."""
+        try:
+            agent = get_claude_agent()
+            ok = agent.set_config(api_key=api_key, model=model)
+            return {"success": ok, "status": agent.get_status()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def test_claude_connection(self):
+        """Tests live connectivity to Anthropic Messages API with the configured key."""
+        try:
+            agent = get_claude_agent()
+            return agent.test_connection()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def inspect_source_file(self, filepath, target_template="v45", use_claude=False):
         """Automatically inspects an uploaded/selected source file, counts records, and analyzes schema vs template."""
         try:
             resolved = find_source_file(filepath)
@@ -62,7 +89,7 @@ class DesktopApi:
             schema = {}
             try:
                 tpl_path = resolve_target_file(target_template)
-                schema = run_agent_analyze_schema(resolved, tpl_path)
+                schema = run_agent_analyze_schema(resolved, tpl_path, use_claude=bool(use_claude))
             except Exception:
                 schema = {}
 
@@ -78,15 +105,16 @@ class DesktopApi:
                 "intercompany_source_col": schema.get("intercompany_source_col"),
                 "auto_discovered_mappings": schema.get("auto_discovered_mappings", []),
                 "unmapped_populated_columns": schema.get("unmapped_populated_columns", []),
+                "claude_ai": schema.get("claude_ai"),
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def analyze_schema(self, filepath, target_template="v45"):
+    def analyze_schema(self, filepath, target_template="v45", use_claude=False):
         """Analyzes source columns vs selected target template columns and returns auto-discovered mappings."""
         try:
             tpl_path = resolve_target_file(target_template)
-            report = run_agent_analyze_schema(filepath, tpl_path)
+            report = run_agent_analyze_schema(filepath, tpl_path, use_claude=bool(use_claude))
             return {"success": True, **report}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -106,7 +134,7 @@ class DesktopApi:
             "max_bulk_files": MAX_BULK_FILES
         }
 
-    def select_file(self, allow_multiple=True, target_template="v45"):
+    def select_file(self, allow_multiple=True, target_template="v45", use_claude=False):
         """Opens native OS file chooser dialog (supports single or bulk up to 12 files) and analyzes schema."""
         if not self._window:
             return {"success": False, "filepath": None, "files": []}
@@ -130,7 +158,7 @@ class DesktopApi:
 
                 inspected_files = []
                 for p in capped:
-                    info = self.inspect_source_file(p, target_template=target_template)
+                    info = self.inspect_source_file(p, target_template=target_template, use_claude=use_claude)
                     if info.get("success"):
                         inspected_files.append(info)
                     else:
@@ -156,6 +184,7 @@ class DesktopApi:
                     "auto_discovered_mappings": first.get("auto_discovered_mappings", []),
                     "intercompany_source_col": first.get("intercompany_source_col"),
                     "unmapped_populated_columns": first.get("unmapped_populated_columns", []),
+                    "claude_ai": first.get("claude_ai"),
                     "files": inspected_files,
                     "exceeded_limit": exceeded,
                     "selected_count": selected_count,
@@ -166,7 +195,7 @@ class DesktopApi:
             print(f"[DesktopApp] File dialog error: {e}", flush=True)
         return {"success": False, "filepath": None, "files": []}
 
-    def stage_uploaded_file(self, filename, base64_data, target_template="v45"):
+    def stage_uploaded_file(self, filename, base64_data, target_template="v45", use_claude=False):
         """Stages a file selected via HTML <input type='file'> into a local temp path and auto-detects structure."""
         try:
             if "," in base64_data:
@@ -178,7 +207,7 @@ class DesktopApi:
             staged_path = os.path.join(stage_dir, safe_name)
             with open(staged_path, "wb") as f:
                 f.write(raw_bytes)
-            info = self.inspect_source_file(staged_path, target_template=target_template)
+            info = self.inspect_source_file(staged_path, target_template=target_template, use_claude=use_claude)
             return {
                 "success": True,
                 "filepath": staged_path,
@@ -190,6 +219,7 @@ class DesktopApi:
                 "auto_discovered_mappings": info.get("auto_discovered_mappings", []),
                 "intercompany_source_col": info.get("intercompany_source_col"),
                 "unmapped_populated_columns": info.get("unmapped_populated_columns", []),
+                "claude_ai": info.get("claude_ai"),
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -213,7 +243,7 @@ class DesktopApi:
             print(f"[DesktopApp] Folder dialog error: {e}", flush=True)
         return {"success": False, "folder": None}
 
-    def process_journal(self, filename, target_template="v45", output_dir=None, output_filename=None):
+    def process_journal(self, filename, target_template="v45", output_dir=None, output_filename=None, use_claude=False):
         """Directly executes Workday EIB ingestion and returns mapped results."""
         try:
             source_to_process = find_source_file(filename)
@@ -243,7 +273,8 @@ class DesktopApi:
                 source_file=source_to_process,
                 excel_template=target_path,
                 output_file=custom_output_file,
-                output_dir=output_dir
+                output_dir=output_dir,
+                use_claude=bool(use_claude)
             )
             target_out = res.get("output_file") or res.get("target_file") or custom_output_file or target_path
 
@@ -258,7 +289,7 @@ class DesktopApi:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def process_both(self, target_template="v45", output_dir=None):
+    def process_both(self, target_template="v45", output_dir=None, use_claude=False):
         """Batch processes both 2026 and 2025 raw accounting files."""
         try:
             if output_dir and not os.path.exists(output_dir):
@@ -268,7 +299,7 @@ class DesktopApi:
                     output_dir = None
 
             target_path = resolve_target_file(target_template)
-            res = run_agent_process(source_file="all", excel_template=target_path, output_dir=output_dir)
+            res = run_agent_process(source_file="all", excel_template=target_path, output_dir=output_dir, use_claude=bool(use_claude))
             return {
                 "success": True,
                 "target_template": target_template,
@@ -277,7 +308,7 @@ class DesktopApi:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def process_bulk(self, filepaths, target_template="v45", output_dir=None, output_prefix=None):
+    def process_bulk(self, filepaths, target_template="v45", output_dir=None, output_prefix=None, use_claude=False):
         """Bulk processes up to 12 selected source files into the chosen Workday EIB template."""
         try:
             if not filepaths or not isinstance(filepaths, (list, tuple)):
@@ -296,9 +327,12 @@ class DesktopApi:
                 source_files=list(filepaths),
                 excel_template=target_path,
                 output_dir=output_dir,
-                output_prefix=output_prefix
+                output_prefix=output_prefix,
+                use_claude=bool(use_claude)
             )
             return res
+        except Exception as e:
+            return {"success": False, "error": str(e)}
         except Exception as e:
             return {"success": False, "error": str(e)}
 

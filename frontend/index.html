@@ -94,10 +94,22 @@
 
       <div class="h-4 w-px bg-zinc-800 mx-1"></div>
 
-      <div class="flex items-center space-x-1">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span class="text-[10px] font-mono text-zinc-400">Local Engine Active</span>
-      </div>
+      <!-- Engine Configuration Trigger Button in Top Right -->
+      <button 
+        id="topEngineBtn"
+        onclick="openEngineConfigModal()" 
+        class="inline-flex items-center space-x-2 px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold bg-[#10131d] hover:bg-[#171b2a] text-zinc-200 border border-app-border transition group cursor-pointer shadow-sm hover:border-indigo-500/50"
+        title="Click to configure ingestion engine: Local Rule Engine vs. Claude AI Agent"
+      >
+        <span id="topEngineIcon" class="w-5 h-5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center transition group-hover:scale-105">
+          <i data-lucide="cpu" class="w-3.5 h-3.5"></i>
+        </span>
+        <div class="flex flex-col text-left leading-tight">
+          <span class="text-[8px] text-zinc-500 uppercase tracking-wider font-bold">Engine</span>
+          <span id="topEngineName" class="text-white text-[10px] font-bold">Local Rules</span>
+        </div>
+        <span id="topEngineDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+      </button>
     </div>
   </header>
 
@@ -181,6 +193,7 @@
         </div>
 
       </section>
+
 
       <!-- PANEL 2: LOCAL DISK SAVE LOCATION & CUSTOM OUTPUT FILENAME -->
       <section class="bg-app-surface border border-app-border rounded-xl p-4 space-y-3 shadow-sm">
@@ -461,6 +474,140 @@
     </div>
   </footer>
 
+  <!-- ENGINE & CLAUDE AI CONFIGURATION MODAL -->
+  <div id="engineConfigModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-[#0e111a] border border-indigo-500/40 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between border-b border-app-border/70 pb-3">
+        <div class="flex items-center space-x-2.5">
+          <span class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/40 flex items-center justify-center font-bold">
+            <i data-lucide="sliders" class="w-4 h-4"></i>
+          </span>
+          <div>
+            <h3 class="font-bold text-sm text-white font-mono">Ingestion Engine Settings</h3>
+            <p class="text-[10px] text-zinc-400 font-mono">Choose how Workday accounting columns are mapped</p>
+          </div>
+        </div>
+        <button onclick="closeEngineConfigModal()" class="text-zinc-400 hover:text-white transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Engine Mode Selection Cards -->
+      <div class="space-y-2">
+        <label class="block text-zinc-300 font-bold text-[11px] font-mono">Active Ingestion Engine:</label>
+        <div class="grid grid-cols-2 gap-2">
+          <!-- Card 1: Local Engine -->
+          <div 
+            id="engineCardLocal"
+            onclick="selectEngineMode('local')"
+            class="p-3 rounded-xl border border-emerald-500/60 bg-emerald-950/20 cursor-pointer transition hover:border-emerald-400 flex flex-col justify-between space-y-1.5"
+          >
+            <div class="flex items-center justify-between">
+              <span class="w-6 h-6 rounded-md bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <i data-lucide="cpu" class="w-3.5 h-3.5"></i>
+              </span>
+              <input type="radio" name="engineModeRadio" id="radioEngineLocal" value="local" checked class="text-emerald-500 focus:ring-0">
+            </div>
+            <div>
+              <div class="font-bold text-white text-xs font-mono">Local Rule Engine</div>
+              <p class="text-[9.5px] text-zinc-400 font-mono mt-0.5 leading-snug">Deterministic, 100% offline heuristic &amp; alias matching. No API key needed.</p>
+            </div>
+            <span class="inline-block text-[8px] font-mono text-emerald-400 font-bold uppercase tracking-wider">Fast &amp; Offline</span>
+          </div>
+
+          <!-- Card 2: Claude AI Agent -->
+          <div 
+            id="engineCardClaude"
+            onclick="selectEngineMode('claude')"
+            class="p-3 rounded-xl border border-app-border bg-[#090b11] cursor-pointer transition hover:border-indigo-400 flex flex-col justify-between space-y-1.5"
+          >
+            <div class="flex items-center justify-between">
+              <span class="w-6 h-6 rounded-md bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                <i data-lucide="bot" class="w-3.5 h-3.5"></i>
+              </span>
+              <input type="radio" name="engineModeRadio" id="radioEngineClaude" value="claude" class="text-indigo-500 focus:ring-0">
+            </div>
+            <div>
+              <div class="font-bold text-white text-xs font-mono">Claude AI Agent</div>
+              <p class="text-[9.5px] text-zinc-400 font-mono mt-0.5 leading-snug">Autonomous reasoning with Workday EIB skill v1.0. Intelligently maps novel columns.</p>
+            </div>
+            <span class="inline-block text-[8px] font-mono text-indigo-400 font-bold uppercase tracking-wider">Autonomous Skill</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Claude Configuration Section (Active when Claude is selected) -->
+      <div id="claudeOptionsSection" class="space-y-3 font-mono text-xs pt-1 border-t border-app-border/40">
+        <div>
+          <label class="block text-zinc-300 font-bold mb-1 text-[11px]">Anthropic / Claude API Key:</label>
+          <div class="relative">
+            <input 
+              type="password" 
+              id="claudeApiKeyInput" 
+              placeholder="sk-ant-api03-..." 
+              class="w-full bg-[#080a10] border border-indigo-500/40 rounded-lg pl-3 pr-10 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-400"
+            />
+            <button type="button" onclick="toggleApiKeyVisibility()" class="absolute right-2.5 top-2 text-zinc-400 hover:text-white">
+              <i data-lucide="eye" id="eyeIcon" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <div class="flex items-center justify-between mt-1 text-[10px]">
+            <span class="text-zinc-400">Current status: <span id="modalKeyStatus" class="text-zinc-500 font-mono">Not configured</span></span>
+            <span class="text-zinc-400">Saved locally in <span class="text-indigo-400">claude_config.json</span></span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-zinc-300 font-bold mb-1 text-[11px]">Claude Reasoning Model:</label>
+          <select id="modalClaudeModelSelect" class="w-full bg-[#080a10] border border-app-border rounded-lg px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-indigo-400">
+            <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (Recommended — High Accuracy)</option>
+            <option value="claude-haiku-5-5">Claude Haiku 5.5 (Fast Reasoning)</option>
+            <option value="claude-opus-5-5">Claude Opus 5.5 (Deep Reasoning)</option>
+            <option value="claude-fable-5-2">Claude Fable 5.2 (Alternative Architecture)</option>
+          </select>
+        </div>
+
+        <div class="p-2.5 rounded-lg bg-[#080a10] border border-app-border text-[10px] text-zinc-400 space-y-1">
+          <div class="text-indigo-300 font-semibold flex items-center gap-1">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5 text-indigo-400"></i>
+            Bundled Skill: workday-eib-mapper
+          </div>
+          <p>Equips Claude with deep knowledge of Workday two-sheet v45.1 &amp; single-sheet v46-v48 schemas, zero-amount rules, 3-digit cost center padding, and clean underscore stripping for Intercompany Affiliates (LE04).</p>
+        </div>
+
+        <!-- Latest Claude AI Reasoning Review Box inside Modal -->
+        <div id="modalReasoningBox" class="p-2.5 rounded-lg bg-[#080a10] border border-indigo-500/30 text-[10px] space-y-1">
+          <div class="text-indigo-400 font-bold flex items-center gap-1">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            Latest AI Reasoning Summary:
+          </div>
+          <div id="claudeReasoningText" class="text-zinc-300 font-mono leading-relaxed max-h-24 overflow-y-auto">
+            Ready to autonomously classify GL codes, strip intercompany underscores (LE04), format cost centers (3-digit), and map newly introduced columns upon ingestion.
+          </div>
+        </div>
+
+        <div id="modalTestResult" class="hidden p-2 rounded-lg text-[10px]"></div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="flex items-center justify-between pt-2 border-t border-app-border/40">
+        <button onclick="testClaudeFromModal()" id="btnModalPing" class="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-mono font-semibold transition flex items-center space-x-1">
+          <i data-lucide="zap" class="w-3 h-3 text-indigo-400"></i>
+          <span>Test Ping</span>
+        </button>
+        <div class="flex items-center space-x-2">
+          <button onclick="closeEngineConfigModal()" class="px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs font-mono transition">
+            Cancel
+          </button>
+          <button onclick="saveEngineConfigModal()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-mono font-bold transition shadow-md shadow-indigo-600/30">
+            Save &amp; Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     // Desktop App State
     const MAX_BULK_FILES = 12;
@@ -473,6 +620,8 @@
     let selectedTemplateVersion = "v45.1";
     let selectedTemplateFilename = "Import_Accounting_Journal_v45.1.template.xlsx";
     let lastGeneratedFile = "";
+    let isClaudeAiActive = false;
+    let claudeAgentStatus = null;
 
     const TEMPLATES = {
       'v45': { version: 'v45.1', file: 'Import_Accounting_Journal_v45.1.template.xlsx', name: 'Two-Sheet Relational' },
@@ -509,6 +658,7 @@
 
     document.addEventListener("DOMContentLoaded", async () => {
       await loadDefaultPaths();
+      await initClaudeAgent();
 
       // Setup fallback multi-file input (stages actual file bytes via Native IPC, enforces 12 max)
       const fallbackInput = document.getElementById("fallbackFileInput");
@@ -526,7 +676,7 @@
           });
           if (api && api.stage_uploaded_file) {
             try {
-              const staged = await api.stage_uploaded_file(file.name, dataUrl, selectedTemplateId);
+              const staged = await api.stage_uploaded_file(file.name, dataUrl, selectedTemplateId, isClaudeAiActive);
               if (staged && staged.success && staged.filepath) {
                 stagedList.push(staged);
                 continue;
@@ -547,6 +697,265 @@
 
       lucide.createIcons();
     });
+
+    // Engine & Claude AI Configuration
+    let selectedEngineMode = "local"; // "local" or "claude"
+
+    function openEngineConfigModal() {
+      const modal = document.getElementById("engineConfigModal");
+      const keyInput = document.getElementById("claudeApiKeyInput");
+      const modelSelect = document.getElementById("modalClaudeModelSelect");
+      const resBox = document.getElementById("modalTestResult");
+      if (resBox) resBox.className = "hidden";
+
+      // Select engine mode based on current isClaudeAiActive
+      selectEngineMode(isClaudeAiActive ? "claude" : "local");
+
+      if (modelSelect && claudeAgentStatus && claudeAgentStatus.model) {
+        modelSelect.value = claudeAgentStatus.model;
+      }
+      const keyStatus = document.getElementById("modalKeyStatus");
+      if (keyStatus) {
+        if (claudeAgentStatus && claudeAgentStatus.has_key) {
+          keyStatus.innerText = claudeAgentStatus.masked_key || "Configured";
+          keyStatus.className = "text-emerald-400 font-mono font-bold";
+        } else {
+          keyStatus.innerText = "Not configured";
+          keyStatus.className = "text-zinc-500 font-mono";
+        }
+      }
+      if (keyInput) {
+        keyInput.value = "";
+      }
+      if (modal) modal.classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function openClaudeConfigModal() {
+      openEngineConfigModal();
+    }
+
+    function closeEngineConfigModal() {
+      const modal = document.getElementById("engineConfigModal");
+      if (modal) modal.classList.add("hidden");
+    }
+
+    function closeClaudeConfigModal() {
+      closeEngineConfigModal();
+    }
+
+    function selectEngineMode(mode) {
+      selectedEngineMode = mode;
+      const radioLocal = document.getElementById("radioEngineLocal");
+      const radioClaude = document.getElementById("radioEngineClaude");
+      const cardLocal = document.getElementById("engineCardLocal");
+      const cardClaude = document.getElementById("engineCardClaude");
+      const claudeSection = document.getElementById("claudeOptionsSection");
+
+      if (mode === "claude") {
+        if (radioClaude) radioClaude.checked = true;
+        if (radioLocal) radioLocal.checked = false;
+        if (cardClaude) {
+          cardClaude.className = "p-3 rounded-xl border-2 border-indigo-500 bg-indigo-950/30 cursor-pointer transition flex flex-col justify-between space-y-1.5 shadow-md shadow-indigo-500/10";
+        }
+        if (cardLocal) {
+          cardLocal.className = "p-3 rounded-xl border border-app-border bg-[#090b11] cursor-pointer transition hover:border-zinc-700 opacity-60 flex flex-col justify-between space-y-1.5";
+        }
+        if (claudeSection) {
+          claudeSection.classList.remove("opacity-40", "pointer-events-none");
+        }
+      } else {
+        if (radioLocal) radioLocal.checked = true;
+        if (radioClaude) radioClaude.checked = false;
+        if (cardLocal) {
+          cardLocal.className = "p-3 rounded-xl border-2 border-emerald-500 bg-emerald-950/30 cursor-pointer transition flex flex-col justify-between space-y-1.5 shadow-md shadow-emerald-500/10";
+        }
+        if (cardClaude) {
+          cardClaude.className = "p-3 rounded-xl border border-app-border bg-[#090b11] cursor-pointer transition hover:border-zinc-700 opacity-60 flex flex-col justify-between space-y-1.5";
+        }
+        if (claudeSection) {
+          claudeSection.classList.add("opacity-40", "pointer-events-none");
+        }
+      }
+      lucide.createIcons();
+    }
+
+    function updateTopEngineBadge() {
+      const btn = document.getElementById("topEngineBtn");
+      const icon = document.getElementById("topEngineIcon");
+      const name = document.getElementById("topEngineName");
+      const dot = document.getElementById("topEngineDot");
+
+      if (!btn || !name || !dot) return;
+
+      if (isClaudeAiActive) {
+        const modelName = (claudeAgentStatus && claudeAgentStatus.model) ? claudeAgentStatus.model : "Sonnet 5.5";
+        let shortModel = "Claude AI";
+        if (modelName.includes("sonnet")) shortModel = "Claude AI (Sonnet 5.5)";
+        else if (modelName.includes("haiku")) shortModel = "Claude AI (Haiku 5.5)";
+        else if (modelName.includes("opus")) shortModel = "Claude AI (Opus 5.5)";
+        else if (modelName.includes("fable")) shortModel = "Claude AI (Fable 5.2)";
+
+        btn.className = "inline-flex items-center space-x-2 px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold bg-indigo-950/40 hover:bg-indigo-900/50 text-indigo-200 border border-indigo-500/50 transition group cursor-pointer shadow-sm";
+        btn.title = `Active Engine: Claude AI Agent (${modelName}) — Click to configure`;
+        if (icon) {
+          icon.className = "w-5 h-5 rounded-md bg-indigo-500/20 text-indigo-400 border border-indigo-500/40 flex items-center justify-center transition";
+          icon.innerHTML = `<i data-lucide="bot" class="w-3.5 h-3.5"></i>`;
+        }
+        name.innerText = shortModel;
+        dot.className = "w-2 h-2 rounded-full bg-indigo-400 animate-pulse";
+      } else {
+        btn.className = "inline-flex items-center space-x-2 px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold bg-[#10131d] hover:bg-[#171b2a] text-zinc-200 border border-app-border transition group cursor-pointer shadow-sm hover:border-emerald-500/50";
+        btn.title = "Active Engine: Local Rule Engine (Offline) — Click to configure";
+        if (icon) {
+          icon.className = "w-5 h-5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center transition";
+          icon.innerHTML = `<i data-lucide="cpu" class="w-3.5 h-3.5"></i>`;
+        }
+        name.innerText = "Local Rule Engine";
+        dot.className = "w-2 h-2 rounded-full bg-emerald-400";
+      }
+      lucide.createIcons();
+    }
+
+    function toggleApiKeyVisibility() {
+      const input = document.getElementById("claudeApiKeyInput");
+      const icon = document.getElementById("eyeIcon");
+      if (!input) return;
+      if (input.type === "password") {
+        input.type = "text";
+        if (icon) icon.setAttribute("data-lucide", "eye-off");
+      } else {
+        input.type = "password";
+        if (icon) icon.setAttribute("data-lucide", "eye");
+      }
+      lucide.createIcons();
+    }
+
+    async function initClaudeAgent() {
+      const api = await getApi();
+      if (!api || !api.get_claude_status) return;
+      try {
+        const res = await api.get_claude_status();
+        claudeAgentStatus = res;
+        const hasKey = res && res.has_key;
+        const modelSelect = document.getElementById("modalClaudeModelSelect");
+
+        if (modelSelect && res.model) {
+          modelSelect.value = res.model;
+        }
+
+        if (hasKey) {
+          isClaudeAiActive = true;
+          logToConsole(`[Engine] Claude AI Agent active (Model: ${res.model || "claude-sonnet-5-5"} | Skill: workday-eib-mapper)`);
+        } else {
+          isClaudeAiActive = false;
+          logToConsole(`[Engine] Local Rule Engine active (100% offline).`);
+        }
+        updateTopEngineBadge();
+      } catch (e) {
+        console.warn("initClaudeAgent error:", e);
+      }
+    }
+
+    function toggleClaudeAgent(enabled) {
+      selectEngineMode(enabled ? "claude" : "local");
+      saveEngineConfigModal();
+    }
+
+    async function testClaudeFromModal() {
+      const resBox = document.getElementById("modalTestResult");
+      const keyInput = document.getElementById("claudeApiKeyInput");
+      const modelSelect = document.getElementById("modalClaudeModelSelect");
+      const keyVal = keyInput ? keyInput.value.trim() : "";
+      const modelVal = modelSelect ? modelSelect.value : "claude-sonnet-5-5";
+
+      resBox.className = "p-2 rounded-lg text-[10px] bg-indigo-950/50 border border-indigo-500/40 text-indigo-300 block";
+      resBox.innerText = "Connecting to Anthropic API...";
+
+      const api = await getApi();
+      if (!api) {
+        resBox.innerText = "Desktop bridge not ready.";
+        return;
+      }
+
+      if (keyVal) {
+        await api.set_claude_config(keyVal, modelVal);
+      }
+
+      try {
+        const res = await api.test_claude_connection();
+        if (res && res.success) {
+          resBox.className = "p-2 rounded-lg text-[10px] bg-emerald-950/50 border border-emerald-500/40 text-emerald-300 block";
+          resBox.innerText = `Success: Connected to ${res.model}! Response: ${res.message || 'READY'}`;
+          const keyStatus = document.getElementById("modalKeyStatus");
+          if (keyStatus) {
+            keyStatus.innerText = "Verified Active";
+            keyStatus.className = "text-emerald-400 font-mono font-bold";
+          }
+        } else {
+          resBox.className = "p-2 rounded-lg text-[10px] bg-red-950/50 border border-red-500/40 text-red-300 block";
+          resBox.innerText = `Failed: ${(res && res.error) || 'Check API key and network'}`;
+        }
+      } catch (e) {
+        resBox.className = "p-2 rounded-lg text-[10px] bg-red-950/50 border border-red-500/40 text-red-300 block";
+        resBox.innerText = `Error: ${e.message}`;
+      }
+    }
+
+    async function saveEngineConfigModal() {
+      const keyInput = document.getElementById("claudeApiKeyInput");
+      const modelSelect = document.getElementById("modalClaudeModelSelect");
+      const keyVal = keyInput ? keyInput.value.trim() : "";
+      const modelVal = modelSelect ? modelSelect.value : "claude-sonnet-5-5";
+
+      const api = await getApi();
+
+      if (selectedEngineMode === "claude") {
+        if (keyVal && api && api.set_claude_config) {
+          await api.set_claude_config(keyVal, modelVal);
+        } else if (api && api.set_claude_config) {
+          await api.set_claude_config(null, modelVal);
+        }
+
+        // Re-check status
+        if (api && api.get_claude_status) {
+          claudeAgentStatus = await api.get_claude_status();
+        }
+
+        if (!claudeAgentStatus || !claudeAgentStatus.has_key) {
+          alert("Please enter a valid Anthropic API key to enable Claude AI Agent mode.");
+          return;
+        }
+
+        isClaudeAiActive = true;
+        logToConsole(`[Engine] Switched to: Claude AI Agent (${modelVal}) | Skill: workday-eib-mapper`);
+      } else {
+        isClaudeAiActive = false;
+        if (modelVal && api && api.set_claude_config) {
+          await api.set_claude_config(null, modelVal);
+        }
+        logToConsole(`[Engine] Switched to: Local Rule Engine (Deterministic offline matching).`);
+      }
+
+      updateTopEngineBadge();
+      closeEngineConfigModal();
+
+      if (queuedFiles.length > 0 && api && api.inspect_source_file) {
+        const first = queuedFiles[0];
+        try {
+          const info = await api.inspect_source_file(first.filepath, selectedTemplateId, isClaudeAiActive);
+          if (info && info.success) {
+            await applySelectedFiles([info], false);
+          }
+        } catch (e) {
+          console.warn("Re-inspection error:", e);
+        }
+      }
+    }
+
+    function saveClaudeConfigFromModal() {
+      saveEngineConfigModal();
+    }
 
     async function loadDefaultPaths() {
       document.getElementById("sourcePathInput").value = "";
@@ -570,6 +979,14 @@
     function logSchemaDiscovery(meta, prefixLabel = "") {
       if (!meta) return;
       const prefix = prefixLabel ? `[Schema:${prefixLabel}]` : "[Schema]";
+      if (meta.claude_ai && meta.claude_ai.used_ai) {
+        logToConsole(`${prefix} [Claude AI Agent] Model: ${meta.claude_ai.model} | Domain Skill: workday-eib-mapper`);
+        if (meta.claude_ai.reasoning_summary) {
+          logToConsole(`${prefix} [Claude AI Agent] Reasoning: ${meta.claude_ai.reasoning_summary}`);
+          const reasonEl = document.getElementById("claudeReasoningText");
+          if (reasonEl) reasonEl.innerText = meta.claude_ai.reasoning_summary;
+        }
+      }
       if (meta.intercompany_source_col) {
         logToConsole(`${prefix} Intercompany Affiliate matched source column '${meta.intercompany_source_col}' -> Col AC (underscores removed, e.g. 'LE_04' -> 'LE04').`);
       }
@@ -634,7 +1051,8 @@
         const rowsStr = f.total_rows !== undefined && f.total_rows !== null ? ` — ${f.total_rows} lines, ${f.total_journals || 1} journals` : "";
         labelEl.innerText = `${f.filename}${rowsStr}`;
         const autoCount = (f.auto_discovered_mappings || []).length + (f.intercompany_source_col ? 1 : 0);
-        schemaBadge.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>${autoCount} Auto-Mapped Extra Cols</span>`;
+        const aiIndicator = isClaudeAiActive ? " [🤖 Claude AI]" : "";
+        schemaBadge.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>${autoCount} Auto-Mapped Extra Cols${aiIndicator}</span>`;
         btnProcessText.innerText = "Ingest & Generate EIB Spreadsheet";
         outLabel.innerHTML = `<i data-lucide="file-edit" class="w-3.5 h-3.5 text-emerald-400"></i> Output File Name (Enter Your Custom Name):`;
         outBadge.innerText = ".xlsx Auto-Appended";
@@ -642,6 +1060,7 @@
       } else {
         const totalRows = queuedFiles.reduce((acc, f) => acc + (f.total_rows || 0), 0);
         const totalAuto = queuedFiles.reduce((acc, f) => acc + ((f.auto_discovered_mappings || []).length + (f.intercompany_source_col ? 1 : 0)), 0);
+        const aiIndicator = isClaudeAiActive ? " [🤖 Claude AI]" : "";
         currentSourcePath = queuedFiles[0].filepath;
         currentSourceFilename = `${count} files queued`;
         pathInput.value = `Bulk Queue: ${count} files selected (${totalRows} total rows)`;
@@ -658,7 +1077,7 @@
         `).join("");
         labelEl.className = "text-emerald-400 font-bold";
         labelEl.innerText = `Bulk Batch: ${count} / ${MAX_BULK_FILES} files (${totalRows} total line records)`;
-        schemaBadge.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>${totalAuto} Batch Auto-Mappings</span>`;
+        schemaBadge.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3"></i><span>${totalAuto} Batch Auto-Mappings${aiIndicator}</span>`;
         btnProcessText.innerText = `Bulk Process ${count} / ${MAX_BULK_FILES} Files`;
         outLabel.innerHTML = `<i data-lucide="file-edit" class="w-3.5 h-3.5 text-emerald-400"></i> Bulk Output Prefix (Optional):`;
         outBadge.innerText = "Optional Prefix";
@@ -703,7 +1122,7 @@
         try {
           const api = await getApi();
           if (api && api.inspect_source_file) {
-            const info = await api.inspect_source_file(fullPath, selectedTemplateId);
+            const info = await api.inspect_source_file(fullPath, selectedTemplateId, isClaudeAiActive);
             if (info && info.success) detected = info;
           }
         } catch (e) {
@@ -720,6 +1139,7 @@
         auto_discovered_mappings: detected ? (detected.auto_discovered_mappings || []) : [],
         intercompany_source_col: detected ? detected.intercompany_source_col : null,
         unmapped_populated_columns: detected ? (detected.unmapped_populated_columns || []) : [],
+        claude_ai: detected ? detected.claude_ai : null,
       };
       await applySelectedFiles([entry], false);
     }
@@ -729,7 +1149,7 @@
       const api = await getApi();
       if (api && api.select_file) {
         try {
-          const res = await api.select_file(true, selectedTemplateId);
+          const res = await api.select_file(true, selectedTemplateId, isClaudeAiActive);
           if (res && res.files && res.files.length > 0) {
             if (res.exceeded_limit) {
               logToConsole(`[Limit] Selected ${res.selected_count} files; capped at maximum ${MAX_BULK_FILES} files.`);
@@ -797,11 +1217,12 @@
         if (api && api.analyze_schema) {
           for (const f of queuedFiles) {
             try {
-              const rep = await api.analyze_schema(f.filepath, selectedTemplateId);
+              const rep = await api.analyze_schema(f.filepath, selectedTemplateId, isClaudeAiActive);
               if (rep && rep.success) {
                 f.auto_discovered_mappings = rep.auto_discovered_mappings || [];
                 f.intercompany_source_col = rep.intercompany_source_col;
                 f.unmapped_populated_columns = rep.unmapped_populated_columns || [];
+                f.claude_ai = rep.claude_ai;
                 logSchemaDiscovery(f, f.filename);
               }
             } catch (e) {
@@ -858,7 +1279,7 @@
           throw new Error("Desktop native bridge is not connected.");
         }
 
-        const data = await api.process_journal(srcName, selectedTemplateId, currentSaveLocation, customOutputName);
+        const data = await api.process_journal(srcName, selectedTemplateId, currentSaveLocation, customOutputName, isClaudeAiActive);
         if (!data || !data.success) {
           throw new Error((data && data.error) || "Ingestion process encountered an error.");
         }
@@ -871,6 +1292,15 @@
         const icCount = summary.intercompany_mapped_count ?? 0;
         const autoCols = summary.auto_mapped_columns || [];
         lastGeneratedFile = data.target_path || data.target_file;
+
+        if (summary.claude_ai && summary.claude_ai.used_ai) {
+          logToConsole(`[Claude AI Agent] Model: ${summary.claude_ai.model} | Skill: workday-eib-mapper`);
+          if (summary.claude_ai.reasoning_summary) {
+            logToConsole(`[Claude AI Agent] Reasoning: ${summary.claude_ai.reasoning_summary}`);
+            const reasonEl = document.getElementById("claudeReasoningText");
+            if (reasonEl) reasonEl.innerText = summary.claude_ai.reasoning_summary;
+          }
+        }
 
         logToConsole(`[Ingest] Successfully mapped ${lines} records from source.`);
         logToConsole(`[SpendCategory] Looked up ${scCount} accounts from spend category 1.xlsx.`);
@@ -925,7 +1355,7 @@
         }
 
         const paths = queuedFiles.map(f => f.filepath);
-        const res = await api.process_bulk(paths, selectedTemplateId, currentSaveLocation, prefix || null);
+        const res = await api.process_bulk(paths, selectedTemplateId, currentSaveLocation, prefix || null, isClaudeAiActive);
         if (!res || (!res.success && !res.results)) {
           throw new Error((res && res.error) || "Bulk processing error.");
         }
@@ -976,7 +1406,7 @@
           throw new Error("Desktop native bridge is not connected.");
         }
 
-        const data = await api.process_both(selectedTemplateId, currentSaveLocation);
+        const data = await api.process_both(selectedTemplateId, currentSaveLocation, isClaudeAiActive);
         if (!data || !data.success) {
           throw new Error((data && data.error) || "Batch run error");
         }

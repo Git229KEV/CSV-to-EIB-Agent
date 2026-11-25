@@ -148,3 +148,26 @@ python run_agent.py --source Accounting_Journal_Raw_02_202601.xlsx
 python launch_studio.py
 ```
 *Opens [http://localhost:8080](http://localhost:8080) for real-time verification, worktag summary, and spreadsheet downloads.*
+
+---
+
+## 5. Claude AI Agent Autonomous Engine (`v1.4.0`)
+
+Starting in **v1.4.0**, the workbench introduces a **Dual Ingestion Engine**:
+1. **Local Rule Engine (Deterministic)**: Fast, offline mapper using `_PandasLite` and local lookup tables.
+2. **Claude AI Agent (Autonomous)**: Powered by Anthropic Messages API and guided by the domain skill (`skills/workday-eib-mapper/SKILL.md`).
+
+### Supported Claude Models
+- `claude-sonnet-5-5` (Claude Sonnet 5.5 — Default recommended model)
+- `claude-haiku-5-5` (Claude Haiku 5.5 — High-speed, lightweight processing)
+- `claude-opus-5-5` (Claude Opus 5.5 — Deep complex accounting reasoning)
+- `claude-fable-5-2` (Claude Fable 5.2 — Advanced experimental agentic model)
+
+### Domain Skill Architecture (`skills/workday-eib-mapper/SKILL.md`)
+The Claude AI Agent loads domain-specific accounting rules from `skills/workday-eib-mapper/SKILL.md` covering:
+- **Two-Sheet Journal Relations**: Header deduplication on Sheet 1 (`Import Accounting Journal`) and line item linkage on Sheet 2 (`Journal Entry Line Replacement`) via `Header Key`.
+- **EIB Workbook Extraction**: Automatic detection of Workday metadata rows (skipping rows 1–4 and reading Row 5 `Fields`), allowing raw exports or existing EIB files to be re-ingested.
+- **Spend Category Resolution**: Dynamic lookup against `spend category 1.xlsx` (155 rules) with fallback to raw source worktags.
+- **Intercompany Affiliate Sanitization**: Auto-discovery of intercompany affiliate columns and complete stripping of underscores (`LE_04` -> `LE04`).
+- **Data Hygiene**: Preserving explicit `0.0` debits/credits, formatting 3-digit Cost Centers (`000`), and keeping empty memo cells strictly blank (`None`).
+- **Resilience**: Up to 8,192 token responses with regex JSON recovery and automatic omission of deprecated model parameters (such as `temperature`).
