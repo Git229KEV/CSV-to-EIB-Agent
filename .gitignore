@@ -12,3 +12,15 @@ claude_config.json
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Local generated outputs (kept locally only)
+output/
+/Import_Accounting_Journal_*.xlsx
+/Submit_Accounting_Journal_*.xlsx
+
+# Local test scripts, backups & test artifacts
+test_*.py
+*.png
+*.pdf
+target/*.pristine_backup.xlsx
+.agent/
