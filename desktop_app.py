@@ -89,7 +89,8 @@ class DesktopApi:
             schema = {}
             try:
                 tpl_path = resolve_target_file(target_template)
-                schema = run_agent_analyze_schema(resolved, tpl_path, use_claude=bool(use_claude))
+                # Keep file inspection fast and offline (Claude AI runs during ingestion/transformation)
+                schema = run_agent_analyze_schema(resolved, tpl_path, use_claude=False)
             except Exception:
                 schema = {}
 
@@ -114,7 +115,7 @@ class DesktopApi:
         """Analyzes source columns vs selected target template columns and returns auto-discovered mappings."""
         try:
             tpl_path = resolve_target_file(target_template)
-            report = run_agent_analyze_schema(filepath, tpl_path, use_claude=bool(use_claude))
+            report = run_agent_analyze_schema(filepath, tpl_path, use_claude=False)
             return {"success": True, **report}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -135,7 +136,7 @@ class DesktopApi:
         }
 
     def select_file(self, allow_multiple=True, target_template="v45", use_claude=False):
-        """Opens native OS file chooser dialog (supports single or bulk up to 12 files) and analyzes schema."""
+        """Opens native OS file chooser dialog and immediately returns selected files for instant display."""
         if not self._window:
             return {"success": False, "filepath": None, "files": []}
         try:
@@ -153,24 +154,19 @@ class DesktopApi:
             if result and len(result) > 0:
                 selected_list = list(result)
                 exceeded = len(selected_list) > MAX_BULK_FILES
-                selected_count = len(selected_list)
                 capped = selected_list[:MAX_BULK_FILES]
 
-                inspected_files = []
+                files_data = []
                 for p in capped:
-                    info = self.inspect_source_file(p, target_template=target_template, use_claude=use_claude)
-                    if info.get("success"):
-                        inspected_files.append(info)
-                    else:
-                        inspected_files.append({
-                            "success": False,
-                            "filepath": p,
-                            "filename": os.path.basename(p),
-                            "size": os.path.getsize(p) if os.path.exists(p) else 0,
-                            "error": info.get("error")
-                        })
+                    files_data.append({
+                        "success": True,
+                        "filepath": p,
+                        "filename": os.path.basename(p),
+                        "size": os.path.getsize(p) if os.path.exists(p) else 0,
+                        "format": os.path.splitext(p)[1].upper().lstrip(".") or "XLSX"
+                    })
 
-                first = inspected_files[0]
+                first = files_data[0]
                 return {
                     "success": True,
                     "filepath": first["filepath"],
@@ -178,16 +174,10 @@ class DesktopApi:
                     "filename": first["filename"],
                     "name": first["filename"],
                     "size": first.get("size", 0),
-                    "total_rows": first.get("total_rows"),
-                    "total_journals": first.get("total_journals"),
                     "format": first.get("format"),
-                    "auto_discovered_mappings": first.get("auto_discovered_mappings", []),
-                    "intercompany_source_col": first.get("intercompany_source_col"),
-                    "unmapped_populated_columns": first.get("unmapped_populated_columns", []),
-                    "claude_ai": first.get("claude_ai"),
-                    "files": inspected_files,
+                    "files": files_data,
                     "exceeded_limit": exceeded,
-                    "selected_count": selected_count,
+                    "selected_count": len(selected_list),
                     "max_bulk_files": MAX_BULK_FILES,
                 }
             return {"success": False, "cancelled": True, "filepath": None, "files": []}

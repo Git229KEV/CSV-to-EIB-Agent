@@ -676,7 +676,7 @@
           });
           if (api && api.stage_uploaded_file) {
             try {
-              const staged = await api.stage_uploaded_file(file.name, dataUrl, selectedTemplateId, isClaudeAiActive);
+              const staged = await api.stage_uploaded_file(file.name, dataUrl, selectedTemplateId, false);
               if (staged && staged.success && staged.filepath) {
                 stagedList.push(staged);
                 continue;
@@ -939,18 +939,7 @@
 
       updateTopEngineBadge();
       closeEngineConfigModal();
-
-      if (queuedFiles.length > 0 && api && api.inspect_source_file) {
-        const first = queuedFiles[0];
-        try {
-          const info = await api.inspect_source_file(first.filepath, selectedTemplateId, isClaudeAiActive);
-          if (info && info.success) {
-            await applySelectedFiles([info], false);
-          }
-        } catch (e) {
-          console.warn("Re-inspection error:", e);
-        }
-      }
+      renderFileQueueUI();
     }
 
     function saveClaudeConfigFromModal() {
@@ -1116,32 +1105,50 @@
       });
     }
 
-    async function setSourceFile(fullPath, filename, meta = null) {
-      let detected = meta;
-      if (!detected || detected.total_rows === undefined || detected.total_rows === null) {
+    async function inspectQueuedFilesDetails(items) {
+      const api = await getApi();
+      if (!api || !api.inspect_source_file) return;
+      for (const item of items) {
         try {
-          const api = await getApi();
-          if (api && api.inspect_source_file) {
-            const info = await api.inspect_source_file(fullPath, selectedTemplateId, isClaudeAiActive);
-            if (info && info.success) detected = info;
+          const info = await api.inspect_source_file(item.filepath, selectedTemplateId, false);
+          if (info && info.success) {
+            const target = queuedFiles.find(f => f.filepath === item.filepath);
+            if (target) {
+              target.total_rows = info.total_rows;
+              target.total_journals = info.total_journals;
+              target.format = info.format || target.format;
+              target.size = info.size || target.size;
+              target.auto_discovered_mappings = info.auto_discovered_mappings || [];
+              target.intercompany_source_col = info.intercompany_source_col;
+              target.unmapped_populated_columns = info.unmapped_populated_columns || [];
+              renderFileQueueUI();
+              logToConsole(`[Source] Auto-detected: ${target.filename} (${target.total_rows ?? '?'} lines, ${target.total_journals ?? 1} journals)`);
+              logSchemaDiscovery(target, target.filename);
+            }
           }
-        } catch (e) {
-          console.warn("inspect_source_file error:", e);
+        } catch (err) {
+          console.warn("Background inspect error for " + item.filepath, err);
         }
       }
+    }
+
+    async function setSourceFile(fullPath, filename, meta = null) {
       const entry = {
         filepath: fullPath,
         filename: filename || fullPath.split('\\').pop().split('/').pop(),
-        size: detected ? detected.size : 0,
-        total_rows: detected ? detected.total_rows : null,
-        total_journals: detected ? detected.total_journals : null,
-        format: detected ? detected.format : null,
-        auto_discovered_mappings: detected ? (detected.auto_discovered_mappings || []) : [],
-        intercompany_source_col: detected ? detected.intercompany_source_col : null,
-        unmapped_populated_columns: detected ? (detected.unmapped_populated_columns || []) : [],
-        claude_ai: detected ? detected.claude_ai : null,
+        size: meta ? meta.size : 0,
+        total_rows: meta ? meta.total_rows : null,
+        total_journals: meta ? meta.total_journals : null,
+        format: meta ? meta.format : null,
+        auto_discovered_mappings: meta ? (meta.auto_discovered_mappings || []) : [],
+        intercompany_source_col: meta ? meta.intercompany_source_col : null,
+        unmapped_populated_columns: meta ? (meta.unmapped_populated_columns || []) : [],
+        claude_ai: meta ? meta.claude_ai : null,
       };
       await applySelectedFiles([entry], false);
+      if (entry.total_rows === null || entry.total_rows === undefined) {
+        inspectQueuedFilesDetails([entry]);
+      }
     }
 
     async function browseSourceFile(append = false) {
@@ -1149,16 +1156,26 @@
       const api = await getApi();
       if (api && api.select_file) {
         try {
-          const res = await api.select_file(true, selectedTemplateId, isClaudeAiActive);
+          const res = await api.select_file(true, selectedTemplateId, false);
           if (res && res.files && res.files.length > 0) {
             if (res.exceeded_limit) {
               logToConsole(`[Limit] Selected ${res.selected_count} files; capped at maximum ${MAX_BULK_FILES} files.`);
             }
+            // 1. Immediately show selected files in the UI!
             await applySelectedFiles(res.files, appendBrowseMode);
+            // 2. Inspect line counts and mappings in background without blocking display
+            inspectQueuedFilesDetails(res.files);
             return;
           }
           if (res && res.filepath) {
-            await setSourceFile(res.filepath, res.filename || res.name, res);
+            const single = [{
+              filepath: res.filepath,
+              filename: res.filename || res.name || res.filepath.split('\\').pop().split('/').pop(),
+              size: res.size || 0,
+              format: res.format || 'XLSX'
+            }];
+            await applySelectedFiles(single, appendBrowseMode);
+            inspectQueuedFilesDetails(single);
             return;
           }
           if (res && res.cancelled) {
@@ -1217,7 +1234,7 @@
         if (api && api.analyze_schema) {
           for (const f of queuedFiles) {
             try {
-              const rep = await api.analyze_schema(f.filepath, selectedTemplateId, isClaudeAiActive);
+              const rep = await api.analyze_schema(f.filepath, selectedTemplateId, false);
               if (rep && rep.success) {
                 f.auto_discovered_mappings = rep.auto_discovered_mappings || [];
                 f.intercompany_source_col = rep.intercompany_source_col;
